@@ -9,6 +9,7 @@ import typer
 from rich.console import Console
 
 from pgw.core.config import load_config
+from pgw.downloader.resolver import is_url, resolve
 from pgw.subtitles.converter import save_subtitles
 from pgw.utils.audio import extract_audio
 
@@ -17,8 +18,8 @@ console = Console()
 
 def transcribe(
     input_path: Annotated[
-        Path,
-        typer.Argument(help="Path to video or audio file."),
+        str,
+        typer.Argument(help="Path to video/audio file, or a URL."),
     ],
     language: Annotated[
         str,
@@ -44,47 +45,70 @@ def transcribe(
         bool,
         typer.Option("--no-txt", help="Skip generating plain text file."),
     ] = False,
+    cleanup: Annotated[
+        bool,
+        typer.Option("--cleanup/--no-cleanup", help="Clean up transcription with LLM."),
+    ] = False,
+    provider: Annotated[
+        Optional[str],
+        typer.Option(help="LLM provider for cleanup (e.g. ollama_chat/qwen3:8b)."),
+    ] = None,
 ) -> None:
-    """Transcribe a video or audio file to subtitles with word-level timestamps."""
+    """Transcribe a video or audio file (or URL) to subtitles with word-level timestamps."""
     from pgw.transcriber.whisperx import transcribe as whisperx_transcribe
 
-    if not input_path.is_file():
-        console.print(f"[red]File not found:[/red] {input_path}")
-        raise typer.Exit(1)
+    overrides: dict[str, object] = {
+        "whisper.model_size": model,
+        "whisper.language": language,
+        "whisper.device": device,
+    }
+    if provider is not None:
+        overrides["llm.provider"] = provider
+    config = load_config(**overrides)
 
-    config = load_config(
-        **{
-            "whisper.model_size": model,
-            "whisper.language": language,
-            "whisper.device": device,
-        }
-    )
+    # Resolve input: URL → download, local path → use directly
+    if is_url(input_path):
+        console.print(f"[bold]Downloading:[/bold] {input_path}")
+        source = resolve(input_path, output_dir=config.download.output_dir)
+        video_path = source.video_path
+    else:
+        video_path = Path(input_path)
+        if not video_path.is_file():
+            console.print(f"[red]File not found:[/red] {input_path}")
+            raise typer.Exit(1)
 
     # Extract audio if input is a video file
     audio_suffixes = {".wav", ".mp3", ".flac", ".ogg", ".m4a"}
-    if input_path.suffix.lower() in audio_suffixes:
-        audio_path = input_path
+    if video_path.suffix.lower() in audio_suffixes:
+        audio_path = video_path
     else:
         console.print("[bold]Extracting audio...[/bold]")
-        audio_path = extract_audio(input_path)
+        audio_path = extract_audio(video_path)
 
     # Transcribe
     result = whisperx_transcribe(audio_path, config.whisper)
+    segments = result.segments
+
+    # Optional LLM cleanup
+    if cleanup:
+        from pgw.llm.cleanup import cleanup_subtitles
+
+        console.print("[bold]Cleaning up with LLM...[/bold]")
+        segments = cleanup_subtitles(segments, language, config.llm)
 
     # Determine output paths
     if output is not None:
         sub_path = output
     else:
-        sub_path = input_path.with_suffix(f".{language}.{fmt}")
+        sub_path = video_path.with_suffix(f".{language}.{fmt}")
 
     # Save subtitle file
-    save_subtitles(result.segments, sub_path, fmt=fmt)
+    save_subtitles(segments, sub_path, fmt=fmt)
     console.print(f"[green]Saved:[/green] {sub_path}")
 
     # Also save plain text version
     if not no_txt:
         txt_path = sub_path.with_suffix(".txt")
-        # Avoid overwriting if fmt is already txt
         if txt_path != sub_path:
-            save_subtitles(result.segments, txt_path, fmt="txt")
+            save_subtitles(segments, txt_path, fmt="txt")
             console.print(f"[green]Saved:[/green] {txt_path}")

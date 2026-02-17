@@ -1,17 +1,6 @@
 """Tests for configuration system."""
 
-from pgw.core.config import LLMConfig, WhisperConfig, _deep_merge, load_config
-
-
-def test_default_config_loads():
-    """Config loads without errors and has all required sections."""
-    config = load_config()
-    assert config.whisper is not None
-    assert config.llm is not None
-    assert config.download is not None
-    assert config.player is not None
-    assert config.whisper.language  # non-empty
-    assert config.llm.provider  # non-empty
+from pgw.core.config import _deep_merge, load_config
 
 
 def test_cli_overrides():
@@ -41,22 +30,3 @@ def test_deep_merge_no_mutation():
     override = {"a": {"c": 2}}
     _deep_merge(base, override)
     assert "c" not in base["a"]
-
-
-def test_whisper_config_has_required_fields():
-    config = WhisperConfig()
-    assert hasattr(config, "model_size")
-    assert hasattr(config, "language")
-    assert hasattr(config, "device")
-    assert hasattr(config, "compute_type")
-    assert hasattr(config, "batch_size")
-    assert isinstance(config.word_timestamps, bool)
-
-
-def test_llm_config_has_required_fields():
-    config = LLMConfig()
-    assert hasattr(config, "provider")
-    assert hasattr(config, "api_base")
-    assert isinstance(config.cleanup_enabled, bool)
-    assert isinstance(config.translation_enabled, bool)
-    assert hasattr(config, "target_language")

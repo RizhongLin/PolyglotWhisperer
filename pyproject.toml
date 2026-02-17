@@ -62,3 +62,7 @@ line-length = 100
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "integration: requires external services (Ollama). Run with: pytest -m integration",
+]
+addopts = "-m 'not integration'"

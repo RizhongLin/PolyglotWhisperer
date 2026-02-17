@@ -3,6 +3,7 @@
 import typer
 
 from pgw.cli.transcribe import transcribe
+from pgw.cli.translate import translate
 
 app = typer.Typer(
     name="pgw",
@@ -17,3 +18,4 @@ def main() -> None:
 
 
 app.command("transcribe")(transcribe)
+app.command("translate")(translate)
