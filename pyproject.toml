@@ -1,0 +1,64 @@
+[project]
+name = "pgw"
+version = "0.1.0"
+description = "Video transcription & translation for language learners"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "typer>=0.12",
+    "rich>=13.0",
+    "pysubs2>=1.8",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+]
+
+[project.optional-dependencies]
+transcribe = [
+    "whisperx>=3.3",
+]
+download = [
+    "yt-dlp>=2025.1",
+]
+llm = [
+    "litellm[proxy]>=1.40",
+    "ollama>=0.4",
+]
+player = [
+    "python-mpv>=1.0",
+]
+all = [
+    "pgw[transcribe,download,llm,player]",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.4",
+    "black>=24.0",
+]
+
+[project.scripts]
+pgw = "pgw.cli.app:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pgw"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.black]
+target-version = ["py311"]
+line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

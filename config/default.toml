@@ -1,0 +1,28 @@
+[whisper]
+model_size = "large-v3"
+language = "fr"
+device = "auto"
+compute_type = "float16"
+batch_size = 16
+word_timestamps = true
+
+[llm]
+provider = "ollama_chat/qwen3:8b"
+api_base = "http://localhost:11434"
+temperature = 0.3
+max_tokens = 4096
+cleanup_enabled = true
+translation_enabled = true
+target_language = "en"
+
+[download]
+output_dir = "./downloads"
+format = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]"
+
+[player]
+backend = "mpv"
+sub_font_size = 40
+secondary_sub_font_size = 32
+
+[general]
+workspace_dir = "./pgw_workspace"
