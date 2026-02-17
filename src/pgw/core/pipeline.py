@@ -176,12 +176,10 @@ def run_pipeline(
         from pgw.player.mpv_player import play as mpv_play
 
         if check_mpv():
-            primary_subs = vtt_path
-            secondary_subs = paths.get("translation_vtt")
             mpv_play(
                 video_dest,
-                primary_subs=primary_subs,
-                secondary_subs=secondary_subs,
+                primary_subs=vtt_path,
+                bilingual_subs=paths.get("bilingual_vtt"),
                 config=config.player,
             )
         else:

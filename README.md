@@ -22,8 +22,16 @@ Built for watching foreign-language media (like Swiss French news from RTS) with
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/) (package manager)
 - [ffmpeg](https://ffmpeg.org/) (audio extraction)
-- [mpv](https://mpv.io/) (video playback)
+- [mpv](https://mpv.io/) (video playback, optional)
 - [Ollama](https://ollama.com/) (local LLM, optional)
+
+```bash
+# macOS
+brew install ffmpeg mpv
+
+# Ubuntu/Debian
+sudo apt install ffmpeg mpv
+```
 
 ### Installation
 
@@ -40,24 +48,43 @@ ollama pull qwen3:8b
 ### Usage
 
 ```bash
-# Full pipeline: transcribe, clean, translate, and play
-pgw run "https://www.rts.ch/play/tv/..." --translate en
+# Full pipeline: download, transcribe, translate
+pgw run "https://www.rts.ch/play/tv/..." --translate en --no-play
+
+# Play from workspace (auto-detects video + bilingual subtitles)
+pgw play pgw_workspace/19h30/20260217_164802/
 
 # Transcribe a local video
 pgw transcribe ~/Videos/news.mp4 --language fr
 
 # Translate existing subtitles
-pgw translate subtitles.fr.srt --to en
+pgw translate subtitles.fr.vtt --to en
 
-# Play with dual subtitles
-pgw play video.mp4 --subs subtitles.fr.srt --translation subtitles.en.srt
+# Play with explicit subtitle file
+pgw play video.mp4 --subs transcription.fr.vtt
+pgw play video.mp4 --bilingual bilingual.fr-en.vtt
+```
+
+### Workspace Output
+
+Each processed video gets a workspace directory:
+
+```
+pgw_workspace/19h30/20260217_164802/
+├── video.mp4                    # Downloaded/copied video
+├── audio.wav                    # Extracted audio
+├── transcription.fr.vtt         # Original language subtitles
+├── transcription.fr.txt         # Plain text transcript
+├── translation.en.vtt           # Translated subtitles
+├── translation.en.txt           # Plain text translation
+├── bilingual.fr-en.vtt          # Both languages in one file (positioned)
+├── transcription.json           # Full Whisper result for reprocessing
+└── metadata.json                # Processing parameters and file inventory
 ```
 
 ## Supported Languages
 
-Whisper supports **100 languages** for transcription. Run `pgw languages` to see the full list.
-
-stable-ts provides word-level timestamps natively for all languages using Whisper's built-in alignment. Use `pgw languages` to see the full list.
+Whisper supports **100 languages** for transcription with word-level timestamps via stable-ts. Run `pgw languages` to see the full list.
 
 <details>
 <summary>Common language codes</summary>
@@ -104,7 +131,7 @@ Video/URL → Download → Extract Audio → Whisper Transcription (stable-ts)
 | Local LLM       | [Ollama](https://ollama.com/) with Qwen 3 (default)                                     |
 | Video Download  | [yt-dlp](https://github.com/yt-dlp/yt-dlp)                                              |
 | Subtitle I/O    | [pysubs2](https://github.com/tkarabela/pysubs2)                                         |
-| Video Playback  | [mpv](https://mpv.io/) via [python-mpv](https://github.com/jaseg/python-mpv)            |
+| Video Playback  | [mpv](https://mpv.io/) (system binary, no Python binding needed)                        |
 | CLI             | [Typer](https://typer.tiangolo.com/) + [Rich](https://github.com/Textualize/rich)       |
 
 ## Roadmap

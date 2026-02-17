@@ -26,11 +26,8 @@ llm = [
     "litellm[proxy]>=1.40",
     "ollama>=0.4",
 ]
-player = [
-    "python-mpv>=1.0",
-]
 all = [
-    "pgw[transcribe,download,llm,player]",
+    "pgw[transcribe,download,llm]",
 ]
 dev = [
     "pytest>=8.0",

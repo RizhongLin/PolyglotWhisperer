@@ -1489,7 +1489,6 @@ dependencies = [
 all = [
     { name = "litellm", extra = ["proxy"] },
     { name = "ollama" },
-    { name = "python-mpv" },
     { name = "setuptools" },
     { name = "stable-ts", extra = ["mlx"] },
     { name = "yt-dlp" },
@@ -1507,9 +1506,6 @@ llm = [
     { name = "litellm", extra = ["proxy"] },
     { name = "ollama" },
 ]
-player = [
-    { name = "python-mpv" },
-]
 transcribe = [
     { name = "setuptools" },
     { name = "stable-ts", extra = ["mlx"] },
@@ -1520,13 +1516,12 @@ requires-dist = [
     { name = "black", marker = "extra == 'dev'", specifier = ">=24.0" },
     { name = "litellm", extras = ["proxy"], marker = "extra == 'llm'", specifier = ">=1.40" },
     { name = "ollama", marker = "extra == 'llm'", specifier = ">=0.4" },
-    { name = "pgw", extras = ["transcribe", "download", "llm", "player"], marker = "extra == 'all'" },
+    { name = "pgw", extras = ["transcribe", "download", "llm"], marker = "extra == 'all'" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pydantic-settings", specifier = ">=2.0" },
     { name = "pysubs2", specifier = ">=1.8" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
-    { name = "python-mpv", marker = "extra == 'player'", specifier = ">=1.0" },
     { name = "rich", specifier = ">=13.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
     { name = "setuptools", marker = "extra == 'transcribe'" },
@@ -1535,7 +1530,7 @@ requires-dist = [
     { name = "typer", specifier = ">=0.12" },
     { name = "yt-dlp", marker = "extra == 'download'", specifier = ">=2025.1" },
 ]
-provides-extras = ["transcribe", "download", "llm", "player", "all", "dev"]
+provides-extras = ["transcribe", "download", "llm", "all", "dev"]
 
 [[package]]
 name = "platformdirs"
@@ -1840,15 +1835,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/f0/26/19cadc79a718c5edbec86fd4919a6b6d3f681039a2f6d66d14be94e75fb9/python_dotenv-1.2.1.tar.gz", hash = "sha256:42667e897e16ab0d66954af0e60a9caa94f0fd4ecf3aaf6d2d260eec1aa36ad6", size = 44221, upload-time = "2025-10-26T15:12:10.434Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/14/1b/a298b06749107c305e1fe0f814c6c74aea7b2f1e10989cb30f544a1b3253/python_dotenv-1.2.1-py3-none-any.whl", hash = "sha256:b81ee9561e9ca4004139c6cbba3a238c32b03e4894671e181b671e8cb8425d61", size = 21230, upload-time = "2025-10-26T15:12:09.109Z" },
-]
-
-[[package]]
-name = "python-mpv"
-version = "1.0.8"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/77/bc/6aa34c8805ff62e2fefc7d171563c60598aac215d5241186031a2c839935/python_mpv-1.0.8.tar.gz", hash = "sha256:017fa359da059c831a94c419083491903e6d2f7c81b9841c33c196cabf4b3fe3", size = 52680, upload-time = "2025-04-25T09:51:40.048Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/22/f3/4c632eaacebfc62ab9414586137aecf6c0ea2a1e99708cf5a4c0dec13ae0/python_mpv-1.0.8-py3-none-any.whl", hash = "sha256:b5296403e990fb7348df4ca2211937a030f524bf638657bda7e45a00bc2df0cd", size = 46169, upload-time = "2025-04-25T09:51:37.775Z" },
 ]
 
 [[package]]

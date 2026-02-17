@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import subprocess
 from pathlib import Path
 
 from rich.console import Console
@@ -21,55 +22,41 @@ def play(
     video_path: Path,
     primary_subs: Path | None = None,
     secondary_subs: Path | None = None,
+    bilingual_subs: Path | None = None,
     config: PlayerConfig | None = None,
 ) -> None:
-    """Play a video with optional dual subtitles.
+    """Play a video with subtitles via mpv subprocess.
 
-    Primary subs (original language) shown at bottom.
-    Secondary subs (translation) shown at top.
+    If bilingual_subs is provided, uses it as a single track with
+    built-in positioning (original at bottom, translation at top).
+    Otherwise falls back to primary_subs only.
 
     Args:
         video_path: Path to the video file.
         primary_subs: Path to primary subtitle file (original language).
-        secondary_subs: Path to secondary subtitle file (translation).
+        secondary_subs: Unused, kept for API compatibility.
+        bilingual_subs: Path to bilingual VTT with positioning cues.
         config: Player configuration.
     """
     if not check_mpv():
         raise FileNotFoundError("mpv not found. Install it with: brew install mpv")
 
-    try:
-        import mpv
-    except ImportError:
-        raise ImportError("python-mpv is not installed. Install with: uv sync --extra player")
-
     if config is None:
         config = PlayerConfig()
 
-    player = mpv.MPV(
-        input_default_bindings=True,
-        input_vo_keyboard=True,
-        osc=True,
-    )
+    cmd = ["mpv", str(video_path)]
+    cmd.append(f"--sub-font-size={config.sub_font_size}")
 
-    player["sub-font-size"] = config.sub_font_size
-
-    if primary_subs and primary_subs.is_file():
-        player["sub-file"] = str(primary_subs)
-    if secondary_subs and secondary_subs.is_file():
-        player["secondary-sub-file"] = str(secondary_subs)
-        player["secondary-sub-visibility"] = True
-
-    console.print(f"[bold]Playing:[/bold] {video_path.name}")
-    if primary_subs:
+    # Prefer bilingual VTT (has positioning baked in)
+    if bilingual_subs and bilingual_subs.is_file():
+        cmd.append(f"--sub-file={bilingual_subs}")
+        console.print(f"[bold]Playing:[/bold] {video_path.name}")
+        console.print(f"[bold]Subtitles:[/bold] {bilingual_subs.name} (bilingual)")
+    elif primary_subs and primary_subs.is_file():
+        cmd.append(f"--sub-file={primary_subs}")
+        console.print(f"[bold]Playing:[/bold] {video_path.name}")
         console.print(f"[bold]Subtitles:[/bold] {primary_subs.name}")
-    if secondary_subs:
-        console.print(f"[bold]Translation:[/bold] {secondary_subs.name}")
+    else:
+        console.print(f"[bold]Playing:[/bold] {video_path.name}")
 
-    player.play(str(video_path))
-
-    try:
-        player.wait_for_playback()
-    except mpv.ShutdownError:
-        pass
-    finally:
-        player.terminate()
+    subprocess.run(cmd)
