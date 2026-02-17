@@ -1,9 +1,7 @@
 [whisper]
-model_size = "large-v3"
+model_size = "large-v3-turbo"
 language = "fr"
 device = "auto"
-compute_type = "float16"
-batch_size = 16
 word_timestamps = true
 
 [llm]

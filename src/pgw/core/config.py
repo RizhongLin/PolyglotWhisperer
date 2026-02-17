@@ -23,11 +23,9 @@ _PROJECT_CONFIG = Path("pgw.toml")
 
 
 class WhisperConfig(BaseModel):
-    model_size: str = "large-v3"
+    model_size: str = "large-v3-turbo"
     language: str = "fr"
     device: str = "auto"
-    compute_type: str = "float16"
-    batch_size: int = 16
     word_timestamps: bool = True
 
 

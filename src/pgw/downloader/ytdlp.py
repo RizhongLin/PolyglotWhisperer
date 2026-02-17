@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 
 from rich.console import Console
@@ -12,6 +14,7 @@ from pgw.core.models import VideoSource
 console = Console()
 
 _DEFAULT_FORMAT = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+_MANIFEST_NAME = ".downloads.jsonl"
 
 
 def _make_progress() -> Progress:
@@ -24,12 +27,59 @@ def _make_progress() -> Progress:
     )
 
 
+def _sha256(path: Path) -> str:
+    """Compute SHA-256 hash of a file."""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _load_manifest(output_dir: Path) -> list[dict]:
+    """Load the download manifest (JSONL)."""
+    manifest_path = output_dir / _MANIFEST_NAME
+    if not manifest_path.is_file():
+        return []
+    entries = []
+    for line in manifest_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line:
+            entries.append(json.loads(line))
+    return entries
+
+
+def _append_manifest(output_dir: Path, entry: dict) -> None:
+    """Append an entry to the download manifest."""
+    manifest_path = output_dir / _MANIFEST_NAME
+    with open(manifest_path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+def _find_cached(url: str, output_dir: Path) -> VideoSource | None:
+    """Check if a URL has already been downloaded and return cached VideoSource."""
+    for entry in _load_manifest(output_dir):
+        if entry.get("url") == url:
+            cached_path = Path(entry["path"])
+            if cached_path.is_file():
+                console.print(f"[dim]Found cached download:[/dim] {cached_path}")
+                return VideoSource(
+                    video_path=cached_path,
+                    source_url=url,
+                    title=entry.get("title", cached_path.stem),
+                    duration=entry.get("duration"),
+                )
+    return None
+
+
 def download(
     url: str,
     output_dir: Path | None = None,
     fmt: str = _DEFAULT_FORMAT,
 ) -> VideoSource:
     """Download a video from URL using yt-dlp.
+
+    Checks a local manifest first to avoid re-downloading the same URL.
 
     Args:
         url: Video URL.
@@ -48,6 +98,11 @@ def download(
         output_dir = Path("./downloads")
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Check cache first
+    cached = _find_cached(url, output_dir)
+    if cached is not None:
+        return cached
 
     progress = _make_progress()
     task_id: TaskID | None = None
@@ -92,7 +147,9 @@ def download(
     if not downloaded_files:
         # Fallback: find most recent file in output_dir
         downloaded_files = sorted(
-            output_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True
+            (p for p in output_dir.iterdir() if not p.name.startswith(".")),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
         )
 
     if not downloaded_files:
@@ -100,6 +157,24 @@ def download(
 
     video_path = downloaded_files[0]
     console.print(f"[green]Downloaded:[/green] {video_path}")
+
+    # Compute hash and save to manifest
+    console.print("[dim]Computing file hash...[/dim]")
+    file_hash = _sha256(video_path)
+    from datetime import datetime, timezone
+
+    _append_manifest(
+        output_dir,
+        {
+            "url": url,
+            "title": title,
+            "path": str(video_path),
+            "sha256": file_hash,
+            "size_bytes": video_path.stat().st_size,
+            "duration": duration,
+            "downloaded_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
 
     return VideoSource(
         video_path=video_path,
@@ -123,6 +198,5 @@ def extract_info(url: str) -> dict:
 
 def _sanitize_title(title: str) -> str:
     """Rough sanitization to match yt-dlp's filename output."""
-    # yt-dlp replaces some chars; this is a best-effort match for glob
     keep = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .-_()")
     return "".join(c if c in keep else "_" for c in title)

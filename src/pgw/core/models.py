@@ -2,39 +2,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 
 @dataclass
-class WordSegment:
-    """A single word with precise timing from forced alignment."""
-
-    word: str
-    start: float
-    end: float
-    score: float = 0.0
-
-
-@dataclass
 class SubtitleSegment:
-    """A subtitle segment with text, timing, and optional word-level detail."""
+    """A subtitle segment with text and timing, used for LLM processing."""
 
     text: str
     start: float  # seconds
     end: float  # seconds
-    words: list[WordSegment] = field(default_factory=list)
     speaker: str | None = None
-
-
-@dataclass
-class TranscriptionResult:
-    """Output from the transcription engine."""
-
-    segments: list[SubtitleSegment]
-    language: str
-    audio_path: Path
-    model_used: str
 
 
 @dataclass

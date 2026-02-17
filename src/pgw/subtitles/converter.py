@@ -1,4 +1,11 @@
-"""Convert between internal models and subtitle file formats."""
+"""Subtitle conversion utilities.
+
+For transcription output, use stable-ts built-in methods (to_srt_vtt, to_txt,
+save_as_json) directly. This module handles:
+- Converting stable-ts results to SubtitleSegment for LLM processing
+- Saving LLM-modified segments back to subtitle files
+- Loading existing subtitle files
+"""
 
 from __future__ import annotations
 
@@ -6,45 +13,25 @@ from pathlib import Path
 
 import pysubs2
 
-from pgw.core.models import SubtitleSegment, WordSegment
+from pgw.core.models import SubtitleSegment
 
 
-def segments_to_subs(segments: list[SubtitleSegment]) -> pysubs2.SSAFile:
-    """Convert SubtitleSegments to a pysubs2 SSAFile."""
-    subs = pysubs2.SSAFile()
-    for seg in segments:
-        event = pysubs2.SSAEvent(
-            start=pysubs2.make_time(s=seg.start),
-            end=pysubs2.make_time(s=seg.end),
-            text=seg.text,
-        )
-        subs.events.append(event)
-    return subs
-
-
-def subs_to_segments(subs: pysubs2.SSAFile) -> list[SubtitleSegment]:
-    """Convert a pysubs2 SSAFile to SubtitleSegments."""
+def result_to_segments(result) -> list[SubtitleSegment]:
+    """Convert a stable-ts WhisperResult to SubtitleSegments for LLM processing."""
     segments = []
-    for event in subs.events:
-        if event.is_comment:
-            continue
+    for seg in result.segments:
         segments.append(
             SubtitleSegment(
-                text=event.plaintext,
-                start=event.start / 1000.0,
-                end=event.end / 1000.0,
+                text=seg.text.strip(),
+                start=seg.start,
+                end=seg.end,
             )
         )
     return segments
 
 
-def segments_to_text(segments: list[SubtitleSegment]) -> str:
-    """Convert SubtitleSegments to plain text (no timestamps)."""
-    return "\n".join(seg.text for seg in segments if seg.text.strip())
-
-
 def save_subtitles(segments: list[SubtitleSegment], path: Path, fmt: str = "srt") -> Path:
-    """Save segments to a subtitle file.
+    """Save LLM-modified SubtitleSegments to a subtitle file.
 
     Args:
         segments: List of subtitle segments.
@@ -58,9 +45,18 @@ def save_subtitles(segments: list[SubtitleSegment], path: Path, fmt: str = "srt"
     path.parent.mkdir(parents=True, exist_ok=True)
 
     if fmt == "txt":
-        path.write_text(segments_to_text(segments), encoding="utf-8")
+        text = "\n".join(seg.text for seg in segments if seg.text.strip())
+        path.write_text(text, encoding="utf-8")
     else:
-        subs = segments_to_subs(segments)
+        subs = pysubs2.SSAFile()
+        for seg in segments:
+            subs.events.append(
+                pysubs2.SSAEvent(
+                    start=pysubs2.make_time(s=seg.start),
+                    end=pysubs2.make_time(s=seg.end),
+                    text=seg.text,
+                )
+            )
         subs.save(str(path))
 
     return path
@@ -82,30 +78,12 @@ def load_subtitles(path: Path) -> list[SubtitleSegment]:
         ]
 
     subs = pysubs2.load(str(path))
-    return subs_to_segments(subs)
-
-
-def from_whisperx(raw_result: dict) -> list[SubtitleSegment]:
-    """Convert raw WhisperX output dict to SubtitleSegments."""
-    segments = []
-    for seg in raw_result.get("segments", []):
-        words = []
-        for w in seg.get("words", []):
-            if "start" in w and "end" in w:
-                words.append(
-                    WordSegment(
-                        word=w["word"],
-                        start=w["start"],
-                        end=w["end"],
-                        score=w.get("score", 0.0),
-                    )
-                )
-        segments.append(
-            SubtitleSegment(
-                text=seg.get("text", "").strip(),
-                start=seg.get("start", 0.0),
-                end=seg.get("end", 0.0),
-                words=words,
-            )
+    return [
+        SubtitleSegment(
+            text=event.plaintext,
+            start=event.start / 1000.0,
+            end=event.end / 1000.0,
         )
-    return segments
+        for event in subs.events
+        if not event.is_comment
+    ]

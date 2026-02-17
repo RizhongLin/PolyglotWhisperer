@@ -4,18 +4,20 @@ version = "0.1.0"
 description = "Video transcription & translation for language learners"
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.12,<3.14"
 dependencies = [
     "typer>=0.12",
     "rich>=13.0",
     "pysubs2>=1.8",
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
+    "socksio>=1.0",
 ]
 
 [project.optional-dependencies]
 transcribe = [
-    "whisperx>=3.3",
+    "stable-ts[mlx]>=2.16",
+    "setuptools",
 ]
 download = [
     "yt-dlp>=2025.1",
@@ -48,7 +50,7 @@ build-backend = "hatchling.build"
 packages = ["src/pgw"]
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py312"
 line-length = 100
 src = ["src"]
 
@@ -56,7 +58,7 @@ src = ["src"]
 select = ["E", "F", "I", "W"]
 
 [tool.black]
-target-version = ["py311"]
+target-version = ["py312"]
 line-length = 100
 
 [tool.pytest.ini_options]
@@ -66,3 +68,9 @@ markers = [
     "integration: requires external services (Ollama). Run with: pytest -m integration",
 ]
 addopts = "-m 'not integration'"
+
+[tool.uv]
+constraint-dependencies = [
+    "numba>=0.60",
+    "openai-whisper>=20250625",
+]

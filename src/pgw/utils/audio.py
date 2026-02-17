@@ -16,6 +16,8 @@ def extract_audio(
     video_path: Path,
     output_path: Path | None = None,
     sample_rate: int = 16000,
+    start: str | None = None,
+    duration: str | None = None,
 ) -> Path:
     """Extract audio from a video file to WAV format.
 
@@ -23,7 +25,9 @@ def extract_audio(
         video_path: Path to the input video file.
         output_path: Path for the output WAV file. Defaults to
             same directory and stem as video with .wav extension.
-        sample_rate: Audio sample rate in Hz. WhisperX expects 16000.
+        sample_rate: Audio sample rate in Hz. Whisper expects 16000.
+        start: Start time for clipping (ffmpeg format: "HH:MM:SS" or seconds).
+        duration: Duration to extract (ffmpeg format: "HH:MM:SS" or seconds).
 
     Returns:
         Path to the extracted audio file.
@@ -47,18 +51,34 @@ def extract_audio(
 
     cmd = [
         "ffmpeg",
-        "-i",
-        str(video_path),
-        "-vn",  # no video
-        "-acodec",
-        "pcm_s16le",  # 16-bit PCM
-        "-ar",
-        str(sample_rate),  # sample rate
-        "-ac",
-        "1",  # mono
-        "-y",  # overwrite
-        str(output_path),
     ]
+
+    if start is not None:
+        cmd.extend(["-ss", str(start)])
+
+    cmd.extend(
+        [
+            "-i",
+            str(video_path),
+        ]
+    )
+
+    if duration is not None:
+        cmd.extend(["-t", str(duration)])
+
+    cmd.extend(
+        [
+            "-vn",  # no video
+            "-acodec",
+            "pcm_s16le",  # 16-bit PCM
+            "-ar",
+            str(sample_rate),  # sample rate
+            "-ac",
+            "1",  # mono
+            "-y",  # overwrite
+            str(output_path),
+        ]
+    )
 
     subprocess.run(cmd, check=True, capture_output=True)
     return output_path

@@ -21,11 +21,11 @@ def translate(
     ],
     to: Annotated[
         str,
-        typer.Option("--to", "-t", help="Target language code."),
+        typer.Option("--to", "-t", help="Target language code (run 'pgw languages' to list)."),
     ] = "en",
     source: Annotated[
         str,
-        typer.Option("--from", "-s", help="Source language code."),
+        typer.Option("--from", "-s", help="Source language code (run 'pgw languages' to list)."),
     ] = "fr",
     provider: Annotated[
         Optional[str],
@@ -45,7 +45,15 @@ def translate(
     ] = False,
 ) -> None:
     """Translate a subtitle file to another language using an LLM."""
+    from pgw.core.languages import validate_language
     from pgw.llm.translator import translate_subtitles
+
+    for code in (source, to):
+        try:
+            validate_language(code)
+        except ValueError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1)
 
     if not subtitle_file.is_file():
         console.print(f"[red]File not found:[/red] {subtitle_file}")

@@ -83,7 +83,6 @@ def cleanup_subtitles(
                         text=final_text,
                         start=seg.start,
                         end=seg.end,
-                        words=seg.words,
                         speaker=seg.speaker,
                     )
                 )

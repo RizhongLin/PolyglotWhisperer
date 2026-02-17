@@ -6,7 +6,7 @@ Built for watching foreign-language media (like Swiss French news from RTS) with
 
 ## Features
 
-- **Accurate transcription** — Word-level timestamps via WhisperX with forced alignment
+- **Accurate transcription** — Word-level timestamps via stable-ts (MLX on Apple Silicon, CUDA/CPU elsewhere)
 - **LLM-powered cleanup** — Fix ASR errors, remove filler words, normalize punctuation
 - **LLM translation** — Translate subtitles to any language using local (Ollama) or cloud LLMs
 - **Dual subtitle playback** — Watch videos with original + translated subtitles simultaneously
@@ -18,7 +18,7 @@ Built for watching foreign-language media (like Swiss French news from RTS) with
 
 ### Prerequisites
 
-- Python 3.11+
+- Python 3.12+
 - [uv](https://docs.astral.sh/uv/) (package manager)
 - [ffmpeg](https://ffmpeg.org/) (audio extraction)
 - [mpv](https://mpv.io/) (video playback)
@@ -52,34 +52,68 @@ pgw translate subtitles.fr.srt --to en
 pgw play video.mp4 --subs subtitles.fr.srt --translation subtitles.en.srt
 ```
 
+## Supported Languages
+
+Whisper supports **100 languages** for transcription. Run `pgw languages` to see the full list.
+
+stable-ts provides word-level timestamps natively for all languages using Whisper's built-in alignment. Use `pgw languages` to see the full list.
+
+<details>
+<summary>Common language codes</summary>
+
+| Code | Language   | Alignment |
+| ---- | ---------- | --------- |
+| `fr` | French     | yes       |
+| `en` | English    | yes       |
+| `de` | German     | yes       |
+| `es` | Spanish    | yes       |
+| `it` | Italian    | yes       |
+| `pt` | Portuguese | yes       |
+| `nl` | Dutch      | yes       |
+| `zh` | Chinese    | yes       |
+| `ja` | Japanese   | yes       |
+| `ko` | Korean     | yes       |
+| `ar` | Arabic     | yes       |
+| `ru` | Russian    | yes       |
+| `hi` | Hindi      | yes       |
+| `tr` | Turkish    | yes       |
+| `pl` | Polish     | yes       |
+| `sv` | Swedish    | yes       |
+| `da` | Danish     | yes       |
+| `fi` | Finnish    | yes       |
+| `uk` | Ukrainian  | yes       |
+| `vi` | Vietnamese | yes       |
+
+</details>
+
 ## How It Works
 
 ```
-Video/URL → Download → Extract Audio → WhisperX Transcription
+Video/URL → Download → Extract Audio → Whisper Transcription (stable-ts)
     → LLM Cleanup (fix ASR errors) → LLM Translation
     → Save SRT/TXT files → Play with dual subtitles in mpv
 ```
 
 ## Tech Stack
 
-| Component       | Technology                                                                        |
-| --------------- | --------------------------------------------------------------------------------- |
-| Transcription   | [WhisperX](https://github.com/m-bain/whisperX) (word-level timestamps)            |
-| LLM Integration | [LiteLLM](https://github.com/BerriAI/litellm) (Ollama, OpenAI, Claude, etc.)      |
-| Local LLM       | [Ollama](https://ollama.com/) with Qwen 3 (default)                               |
-| Video Download  | [yt-dlp](https://github.com/yt-dlp/yt-dlp)                                        |
-| Subtitle I/O    | [pysubs2](https://github.com/tkarabela/pysubs2)                                   |
-| Video Playback  | [mpv](https://mpv.io/) via [python-mpv](https://github.com/jaseg/python-mpv)      |
-| CLI             | [Typer](https://typer.tiangolo.com/) + [Rich](https://github.com/Textualize/rich) |
+| Component       | Technology                                                                              |
+| --------------- | --------------------------------------------------------------------------------------- |
+| Transcription   | [stable-ts](https://github.com/jianfch/stable-ts) (MLX/CUDA/CPU, word-level timestamps) |
+| LLM Integration | [LiteLLM](https://github.com/BerriAI/litellm) (Ollama, OpenAI, Claude, etc.)            |
+| Local LLM       | [Ollama](https://ollama.com/) with Qwen 3 (default)                                     |
+| Video Download  | [yt-dlp](https://github.com/yt-dlp/yt-dlp)                                              |
+| Subtitle I/O    | [pysubs2](https://github.com/tkarabela/pysubs2)                                         |
+| Video Playback  | [mpv](https://mpv.io/) via [python-mpv](https://github.com/jaseg/python-mpv)            |
+| CLI             | [Typer](https://typer.tiangolo.com/) + [Rich](https://github.com/Textualize/rich)       |
 
 ## Roadmap
 
 - [x] Project setup
-- [ ] WhisperX transcription with word-level timestamps
-- [ ] LLM subtitle cleanup and translation
-- [ ] yt-dlp video download (RTS/SRF support)
-- [ ] mpv dual-subtitle playback
-- [ ] Full pipeline CLI (`pgw run`)
+- [x] stable-ts transcription with word-level timestamps
+- [x] LLM subtitle cleanup and translation
+- [x] yt-dlp video download (RTS/SRF support)
+- [x] mpv dual-subtitle playback
+- [x] Full pipeline CLI (`pgw run`)
 - [ ] Web-based player alternative
 - [ ] Vocabulary extraction for language learners
 - [ ] Anki card generation from subtitle pairs
