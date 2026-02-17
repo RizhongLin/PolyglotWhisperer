@@ -47,9 +47,8 @@ def ensure_ollama_model(provider: str) -> None:
     if model_name in available:
         return
 
-    # Also check without tag (ollama sometimes stores as "model:latest")
-    base_name = model_name.split(":")[0]
-    if any(m.startswith(base_name) for m in available):
+    # Ollama stores models as "name:tag" — check if the exact base matches with :latest
+    if ":" not in model_name and f"{model_name}:latest" in available:
         return
 
     console.print(f"[bold]Pulling Ollama model:[/bold] {model_name}")
