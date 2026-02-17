@@ -1,0 +1,89 @@
+# PolyglotWhisperer
+
+Video transcription and translation tool for language learners. Transcribe videos with word-level accuracy using Whisper, clean up and translate subtitles with local or cloud LLMs, and play with dual-language subtitles.
+
+Built for watching foreign-language media (like Swiss French news from RTS) with accurate, word-for-word subtitles and their translations side by side.
+
+## Features
+
+- **Accurate transcription** — Word-level timestamps via WhisperX with forced alignment
+- **LLM-powered cleanup** — Fix ASR errors, remove filler words, normalize punctuation
+- **LLM translation** — Translate subtitles to any language using local (Ollama) or cloud LLMs
+- **Dual subtitle playback** — Watch videos with original + translated subtitles simultaneously
+- **Multiple output formats** — SRT, VTT, and plain text
+- **URL support** — Download and process videos from RTS, SRF, and other sites via yt-dlp
+- **Local-first** — Runs entirely offline with Ollama + Whisper, no cloud APIs required
+
+## Quick Start
+
+### Prerequisites
+
+- Python 3.11+
+- [uv](https://docs.astral.sh/uv/) (package manager)
+- [ffmpeg](https://ffmpeg.org/) (audio extraction)
+- [mpv](https://mpv.io/) (video playback)
+- [Ollama](https://ollama.com/) (local LLM, optional)
+
+### Installation
+
+```bash
+# Clone and install
+git clone https://github.com/RizhongLin/PolyglotWhisperer.git
+cd PolyglotWhisperer
+uv sync --all-extras
+
+# Pull a local LLM for translation (optional)
+ollama pull qwen3:8b
+```
+
+### Usage
+
+```bash
+# Full pipeline: transcribe, clean, translate, and play
+pgw run "https://www.rts.ch/play/tv/..." --translate en
+
+# Transcribe a local video
+pgw transcribe ~/Videos/news.mp4 --language fr
+
+# Translate existing subtitles
+pgw translate subtitles.fr.srt --to en
+
+# Play with dual subtitles
+pgw play video.mp4 --subs subtitles.fr.srt --translation subtitles.en.srt
+```
+
+## How It Works
+
+```
+Video/URL → Download → Extract Audio → WhisperX Transcription
+    → LLM Cleanup (fix ASR errors) → LLM Translation
+    → Save SRT/TXT files → Play with dual subtitles in mpv
+```
+
+## Tech Stack
+
+| Component       | Technology                                                                        |
+| --------------- | --------------------------------------------------------------------------------- |
+| Transcription   | [WhisperX](https://github.com/m-bain/whisperX) (word-level timestamps)            |
+| LLM Integration | [LiteLLM](https://github.com/BerriAI/litellm) (Ollama, OpenAI, Claude, etc.)      |
+| Local LLM       | [Ollama](https://ollama.com/) with Qwen 3 (default)                               |
+| Video Download  | [yt-dlp](https://github.com/yt-dlp/yt-dlp)                                        |
+| Subtitle I/O    | [pysubs2](https://github.com/tkarabela/pysubs2)                                   |
+| Video Playback  | [mpv](https://mpv.io/) via [python-mpv](https://github.com/jaseg/python-mpv)      |
+| CLI             | [Typer](https://typer.tiangolo.com/) + [Rich](https://github.com/Textualize/rich) |
+
+## Roadmap
+
+- [x] Project setup
+- [ ] WhisperX transcription with word-level timestamps
+- [ ] LLM subtitle cleanup and translation
+- [ ] yt-dlp video download (RTS/SRF support)
+- [ ] mpv dual-subtitle playback
+- [ ] Full pipeline CLI (`pgw run`)
+- [ ] Web-based player alternative
+- [ ] Vocabulary extraction for language learners
+- [ ] Anki card generation from subtitle pairs
+
+## License
+
+MIT
