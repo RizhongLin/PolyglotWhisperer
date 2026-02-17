@@ -86,12 +86,12 @@ def run_pipeline(
         console.print("[dim]Audio already extracted, skipping.[/dim]")
 
     # Step 4: Transcribe
-    srt_path = paths["transcription_srt"]
+    vtt_path = paths["transcription_vtt"]
     txt_path = paths["transcription_txt"]
     json_path = workspace / "transcription.json"
     needs_llm = (cleanup and config.llm.cleanup_enabled) or translate
 
-    if not srt_path.is_file():
+    if not vtt_path.is_file():
         from pgw.transcriber.stable_ts import transcribe
 
         result = transcribe(audio_path, config.whisper)
@@ -106,9 +106,9 @@ def run_pipeline(
 
             segments = result_to_segments(result)
         else:
-            # Use stable-ts built-in export directly
-            result.to_srt_vtt(str(srt_path))
-            console.print(f"[green]Saved:[/green] {srt_path}")
+            # Use stable-ts built-in export — auto-detects VTT from extension
+            result.to_srt_vtt(str(vtt_path))
+            console.print(f"[green]Saved:[/green] {vtt_path}")
             result.to_txt(str(txt_path))
             console.print(f"[green]Saved:[/green] {txt_path}")
     else:
@@ -116,7 +116,7 @@ def run_pipeline(
         if needs_llm:
             from pgw.subtitles.converter import load_subtitles
 
-            segments = load_subtitles(srt_path)
+            segments = load_subtitles(vtt_path)
 
     # Step 5: LLM cleanup + save (only when LLM is involved)
     if needs_llm:
@@ -128,26 +128,31 @@ def run_pipeline(
 
         from pgw.subtitles.converter import save_subtitles
 
-        save_subtitles(segments, srt_path, fmt="srt")
-        console.print(f"[green]Saved:[/green] {srt_path}")
+        save_subtitles(segments, vtt_path, fmt="vtt")
+        console.print(f"[green]Saved:[/green] {vtt_path}")
         save_subtitles(segments, txt_path, fmt="txt")
         console.print(f"[green]Saved:[/green] {txt_path}")
 
     # Step 6: Optional translation
     if translate:
         from pgw.llm.translator import translate_subtitles
-        from pgw.subtitles.converter import save_subtitles
+        from pgw.subtitles.converter import save_bilingual_vtt, save_subtitles
 
         console.print(f"[bold]Translating to {translate}...[/bold]")
         trans_result = translate_subtitles(segments, language, translate, config.llm)
 
-        trans_srt = paths["translation_srt"]
-        save_subtitles(trans_result.translated, trans_srt, fmt="srt")
-        console.print(f"[green]Saved:[/green] {trans_srt}")
+        trans_vtt = paths["translation_vtt"]
+        save_subtitles(trans_result.translated, trans_vtt, fmt="vtt")
+        console.print(f"[green]Saved:[/green] {trans_vtt}")
 
         trans_txt = paths["translation_txt"]
         save_subtitles(trans_result.translated, trans_txt, fmt="txt")
         console.print(f"[green]Saved:[/green] {trans_txt}")
+
+        # Bilingual VTT: original at bottom, translation at top
+        bi_vtt = paths["bilingual_vtt"]
+        save_bilingual_vtt(segments, trans_result.translated, bi_vtt)
+        console.print(f"[green]Saved:[/green] {bi_vtt}")
 
     # Step 7: Save metadata
     save_metadata(
@@ -171,8 +176,8 @@ def run_pipeline(
         from pgw.player.mpv_player import play as mpv_play
 
         if check_mpv():
-            primary_subs = srt_path
-            secondary_subs = paths.get("translation_srt")
+            primary_subs = vtt_path
+            secondary_subs = paths.get("translation_vtt")
             mpv_play(
                 video_dest,
                 primary_subs=primary_subs,

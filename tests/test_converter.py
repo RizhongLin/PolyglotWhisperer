@@ -5,12 +5,29 @@ from pathlib import Path
 from pgw.core.models import SubtitleSegment
 from pgw.subtitles.converter import (
     load_subtitles,
+    save_bilingual_vtt,
     save_subtitles,
 )
 
 
-def test_save_and_load_srt_roundtrip(tmp_path: Path):
-    """SRT save/load roundtrip preserves text and segment count."""
+def test_save_and_load_vtt_roundtrip(tmp_path: Path):
+    """VTT save/load roundtrip preserves text and segment count."""
+    segments = [
+        SubtitleSegment(text="Bonjour", start=1.0, end=4.0),
+        SubtitleSegment(text="Monde", start=4.5, end=8.0),
+    ]
+    vtt_path = tmp_path / "test.vtt"
+    save_subtitles(segments, vtt_path, fmt="vtt")
+    assert vtt_path.exists()
+
+    loaded = load_subtitles(vtt_path)
+    assert len(loaded) == len(segments)
+    for orig, ld in zip(segments, loaded):
+        assert ld.text == orig.text
+
+
+def test_save_and_load_srt_fallback(tmp_path: Path):
+    """SRT still works as a fallback format."""
     segments = [
         SubtitleSegment(text="Bonjour", start=1.0, end=4.0),
         SubtitleSegment(text="Monde", start=4.5, end=8.0),
@@ -55,7 +72,29 @@ def test_save_txt_skips_empty(tmp_path: Path):
 
 
 def test_load_sample_srt(sample_srt: Path):
-    """Sample SRT fixture loads correctly."""
+    """Sample SRT fixture loads correctly (fallback format)."""
     segments = load_subtitles(sample_srt)
     assert len(segments) > 0
     assert all(seg.text for seg in segments)
+
+
+def test_bilingual_vtt(tmp_path: Path):
+    """Bilingual VTT contains both languages with positioning cues."""
+    original = [
+        SubtitleSegment(text="Bonjour", start=1.0, end=4.0),
+        SubtitleSegment(text="Monde", start=4.5, end=8.0),
+    ]
+    translated = [
+        SubtitleSegment(text="Hello", start=1.0, end=4.0),
+        SubtitleSegment(text="World", start=4.5, end=8.0),
+    ]
+    bi_path = tmp_path / "bilingual.fr-en.vtt"
+    save_bilingual_vtt(original, translated, bi_path)
+    assert bi_path.exists()
+
+    content = bi_path.read_text()
+    assert content.startswith("WEBVTT")
+    assert "Bonjour" in content
+    assert "Hello" in content
+    assert "line:85%" in content
+    assert "line:5%" in content

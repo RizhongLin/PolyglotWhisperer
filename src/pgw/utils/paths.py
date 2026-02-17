@@ -36,19 +36,20 @@ def create_workspace(
 def workspace_paths(workspace: Path, language: str, target_lang: str | None = None) -> dict:
     """Generate standard output paths for a workspace.
 
-    Returns a dict with keys: video, audio, transcription_srt, transcription_txt,
-    translation_srt, translation_txt, metadata.
+    Returns a dict with keys: video, audio, transcription_vtt, transcription_txt,
+    translation_vtt, translation_txt, bilingual_vtt, metadata.
     """
     paths = {
         "video": workspace / "video.mp4",
         "audio": workspace / "audio.wav",
-        "transcription_srt": workspace / f"transcription.{language}.srt",
+        "transcription_vtt": workspace / f"transcription.{language}.vtt",
         "transcription_txt": workspace / f"transcription.{language}.txt",
         "metadata": workspace / "metadata.json",
     }
     if target_lang:
-        paths["translation_srt"] = workspace / f"translation.{target_lang}.srt"
+        paths["translation_vtt"] = workspace / f"translation.{target_lang}.vtt"
         paths["translation_txt"] = workspace / f"translation.{target_lang}.txt"
+        paths["bilingual_vtt"] = workspace / f"bilingual.{language}-{target_lang}.vtt"
     return paths
 
 
@@ -86,11 +87,13 @@ def _classify_file(name: str) -> str:
         return "source_video"
     if name.startswith("audio"):
         return "extracted_audio"
-    if name.startswith("transcription") and name.endswith(".srt"):
+    if name.startswith("bilingual") and name.endswith(".vtt"):
+        return "bilingual_subtitle"
+    if name.startswith("transcription") and name.endswith((".srt", ".vtt")):
         return "transcription_subtitle"
     if name.startswith("transcription") and name.endswith(".txt"):
         return "transcription_text"
-    if name.startswith("translation") and name.endswith(".srt"):
+    if name.startswith("translation") and name.endswith((".srt", ".vtt")):
         return "translation_subtitle"
     if name.startswith("translation") and name.endswith(".txt"):
         return "translation_text"

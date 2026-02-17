@@ -30,7 +30,7 @@ def result_to_segments(result) -> list[SubtitleSegment]:
     return segments
 
 
-def save_subtitles(segments: list[SubtitleSegment], path: Path, fmt: str = "srt") -> Path:
+def save_subtitles(segments: list[SubtitleSegment], path: Path, fmt: str = "vtt") -> Path:
     """Save LLM-modified SubtitleSegments to a subtitle file.
 
     Args:
@@ -60,6 +60,48 @@ def save_subtitles(segments: list[SubtitleSegment], path: Path, fmt: str = "srt"
         subs.save(str(path))
 
     return path
+
+
+def save_bilingual_vtt(
+    original: list[SubtitleSegment],
+    translated: list[SubtitleSegment],
+    path: Path,
+) -> Path:
+    """Save bilingual subtitles as a single VTT with positioning.
+
+    Original text at bottom (line:85%), translated text at top (line:5%).
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    lines = ["WEBVTT", ""]
+    for i, (orig, trans) in enumerate(zip(original, translated), 1):
+        start = _format_vtt_time(orig.start)
+        end = _format_vtt_time(orig.end)
+
+        # Original at bottom
+        lines.append(str(i * 2 - 1))
+        lines.append(f"{start} --> {end} line:85%")
+        lines.append(orig.text)
+        lines.append("")
+
+        # Translation at top
+        lines.append(str(i * 2))
+        lines.append(f"{start} --> {end} line:5%")
+        lines.append(trans.text)
+        lines.append("")
+
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
+def _format_vtt_time(seconds: float) -> str:
+    """Format seconds as VTT timestamp (HH:MM:SS.mmm)."""
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = int(seconds % 60)
+    ms = int((seconds % 1) * 1000)
+    return f"{h:02d}:{m:02d}:{s:02d}.{ms:03d}"
 
 
 def load_subtitles(path: Path) -> list[SubtitleSegment]:

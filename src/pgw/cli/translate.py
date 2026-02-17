@@ -37,8 +37,8 @@ def translate(
     ] = None,
     fmt: Annotated[
         str,
-        typer.Option("--format", "-f", help="Output format: srt, vtt, ass, txt."),
-    ] = "srt",
+        typer.Option("--format", "-f", help="Output format: vtt, srt, ass, txt."),
+    ] = "vtt",
     no_txt: Annotated[
         bool,
         typer.Option("--no-txt", help="Skip generating plain text file."),

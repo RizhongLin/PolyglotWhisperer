@@ -33,7 +33,7 @@ def run(
     cleanup: Annotated[
         bool,
         typer.Option("--cleanup/--no-cleanup", help="Clean up transcription with LLM."),
-    ] = True,
+    ] = False,
     start: Annotated[
         Optional[str],
         typer.Option("--start", help="Start time (e.g. '00:01:00' or '60')."),

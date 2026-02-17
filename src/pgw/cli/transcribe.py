@@ -34,8 +34,8 @@ def transcribe(
     ] = "auto",
     fmt: Annotated[
         str,
-        typer.Option("--format", "-f", help="Output format: srt, vtt, ass."),
-    ] = "srt",
+        typer.Option("--format", "-f", help="Output format: vtt, srt, ass."),
+    ] = "vtt",
     output: Annotated[
         Optional[Path],
         typer.Option("--output", "-o", help="Output file path. Default: <input>.<lang>.<fmt>"),
@@ -124,7 +124,7 @@ def transcribe(
         elif fmt == "ass":
             result.to_ass(str(sub_path))
         else:
-            result.to_srt_vtt(str(sub_path))
+            result.to_srt_vtt(str(sub_path), vtt=True)
 
     console.print(f"[green]Saved:[/green] {sub_path}")
 

@@ -10,7 +10,8 @@ Built for watching foreign-language media (like Swiss French news from RTS) with
 - **LLM-powered cleanup** — Fix ASR errors, remove filler words, normalize punctuation
 - **LLM translation** — Translate subtitles to any language using local (Ollama) or cloud LLMs
 - **Dual subtitle playback** — Watch videos with original + translated subtitles simultaneously
-- **Multiple output formats** — SRT, VTT, and plain text
+- **Bilingual subtitles** — Single VTT file with original at bottom + translation at top, works in any player
+- **Multiple output formats** — VTT (default), SRT, ASS, and plain text
 - **URL support** — Download and process videos from RTS, SRF, and other sites via yt-dlp
 - **Local-first** — Runs entirely offline with Ollama + Whisper, no cloud APIs required
 
@@ -91,7 +92,7 @@ stable-ts provides word-level timestamps natively for all languages using Whispe
 ```
 Video/URL → Download → Extract Audio → Whisper Transcription (stable-ts)
     → LLM Cleanup (fix ASR errors) → LLM Translation
-    → Save SRT/TXT files → Play with dual subtitles in mpv
+    → Save VTT/TXT files + bilingual VTT → Play with dual subtitles in mpv
 ```
 
 ## Tech Stack

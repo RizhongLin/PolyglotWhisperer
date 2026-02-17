@@ -62,15 +62,16 @@ class TestWorkspacePaths:
         paths = workspace_paths(tmp_path, "fr")
         assert paths["video"] == tmp_path / "video.mp4"
         assert paths["audio"] == tmp_path / "audio.wav"
-        assert paths["transcription_srt"] == tmp_path / "transcription.fr.srt"
+        assert paths["transcription_vtt"] == tmp_path / "transcription.fr.vtt"
         assert paths["transcription_txt"] == tmp_path / "transcription.fr.txt"
         assert paths["metadata"] == tmp_path / "metadata.json"
-        assert "translation_srt" not in paths
+        assert "translation_vtt" not in paths
 
     def test_with_translation(self, tmp_path):
         paths = workspace_paths(tmp_path, "fr", target_lang="en")
-        assert paths["translation_srt"] == tmp_path / "translation.en.srt"
+        assert paths["translation_vtt"] == tmp_path / "translation.en.vtt"
         assert paths["translation_txt"] == tmp_path / "translation.en.txt"
+        assert paths["bilingual_vtt"] == tmp_path / "bilingual.fr-en.vtt"
 
 
 class TestSaveMetadata:
@@ -87,7 +88,9 @@ class TestSaveMetadata:
         # Create some workspace files
         (tmp_path / "video.mp4").write_bytes(b"fake video")
         (tmp_path / "audio.wav").write_bytes(b"fake audio")
-        (tmp_path / "transcription.fr.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\nHello")
+        (tmp_path / "transcription.fr.vtt").write_text(
+            "WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nHello"
+        )
 
         meta_path = save_metadata(tmp_path, title="Test")
         data = json.loads(meta_path.read_text())
@@ -95,4 +98,4 @@ class TestSaveMetadata:
         assert "video.mp4" in data["files"]
         assert data["files"]["video.mp4"]["type"] == "source_video"
         assert data["files"]["audio.wav"]["type"] == "extracted_audio"
-        assert data["files"]["transcription.fr.srt"]["type"] == "transcription_subtitle"
+        assert data["files"]["transcription.fr.vtt"]["type"] == "transcription_subtitle"
