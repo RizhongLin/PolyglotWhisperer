@@ -57,18 +57,24 @@ def _append_manifest(output_dir: Path, entry: dict) -> None:
 
 
 def _find_cached(url: str, output_dir: Path) -> VideoSource | None:
-    """Check if a URL has already been downloaded and return cached VideoSource."""
+    """Check if a URL has already been downloaded and the file is intact."""
     for entry in _load_manifest(output_dir):
         if entry.get("url") == url:
             cached_path = Path(entry["path"])
-            if cached_path.is_file():
-                console.print(f"[dim]Found cached download:[/dim] {cached_path}")
-                return VideoSource(
-                    video_path=cached_path,
-                    source_url=url,
-                    title=entry.get("title", cached_path.stem),
-                    duration=entry.get("duration"),
-                )
+            if not cached_path.is_file():
+                continue
+            # Verify file integrity — reject if content was overwritten
+            expected_hash = entry.get("sha256")
+            if expected_hash and _sha256(cached_path) != expected_hash:
+                console.print(f"[yellow]Cache stale (hash mismatch):[/yellow] {cached_path}")
+                continue
+            console.print(f"[dim]Found cached download:[/dim] {cached_path}")
+            return VideoSource(
+                video_path=cached_path,
+                source_url=url,
+                title=entry.get("title", cached_path.stem),
+                duration=entry.get("duration"),
+            )
     return None
 
 
@@ -122,7 +128,7 @@ def download(
 
     opts = {
         "format": fmt,
-        "outtmpl": str(output_dir / "%(title)s.%(ext)s"),
+        "outtmpl": str(output_dir / "%(title)s_%(id)s.%(ext)s"),
         "progress_hooks": [_progress_hook],
         "quiet": True,
         "no_warnings": True,
@@ -133,14 +139,18 @@ def download(
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
         title = info.get("title", "video")
+        video_id = info.get("id", "")
         duration = info.get("duration")
 
         console.print(f"[bold]Title:[/bold] {title}")
         with progress:
             ydl.download([url])
 
-    # Find the downloaded file
-    glob_pattern = f"{_sanitize_title(title)}.*"
+    # Find the downloaded file (title_id.ext pattern)
+    if video_id:
+        glob_pattern = f"{_sanitize_title(title)}_{video_id}.*"
+    else:
+        glob_pattern = f"{_sanitize_title(title)}.*"
     downloaded_files = sorted(
         output_dir.glob(glob_pattern), key=lambda p: p.stat().st_mtime, reverse=True
     )

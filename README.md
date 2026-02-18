@@ -63,6 +63,9 @@ pgw translate subtitles.fr.vtt --to en
 # Play with explicit subtitle file
 pgw play video.mp4 --subs transcription.fr.vtt
 pgw play video.mp4 --bilingual bilingual.fr-en.vtt
+
+# Web player (opens browser, no mpv needed)
+pgw serve pgw_workspace/19h30/20260217_164802/
 ```
 
 ### Workspace Output
@@ -142,7 +145,7 @@ Video/URL → Download → Extract Audio → Whisper Transcription (stable-ts)
 - [x] yt-dlp video download (RTS/SRF support)
 - [x] mpv dual-subtitle playback
 - [x] Full pipeline CLI (`pgw run`)
-- [ ] Web-based player alternative
+- [x] Web-based player alternative (`pgw serve`)
 - [ ] Vocabulary extraction for language learners
 - [ ] Anki card generation from subtitle pairs
 
