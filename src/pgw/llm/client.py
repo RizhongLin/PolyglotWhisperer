@@ -101,3 +101,26 @@ def complete(
 ) -> str:
     """Synchronous wrapper around acomplete."""
     return asyncio.run(acomplete(messages, config, **kwargs))
+
+
+def unload_ollama_model(provider: str) -> None:
+    """Unload an Ollama model from GPU memory immediately.
+
+    Sends a generate request with keep_alive=0, which tells Ollama
+    to unload the model right away instead of keeping it for 5 minutes.
+    No-op if the provider is not an Ollama model.
+    """
+    model_name = _extract_ollama_model(provider)
+    if model_name is None:
+        return
+
+    try:
+        import ollama
+    except ImportError:
+        return
+
+    try:
+        ollama.generate(model=model_name, keep_alive=0)
+        console.print(f"[dim]Unloaded Ollama model:[/dim] {model_name}")
+    except Exception:
+        pass

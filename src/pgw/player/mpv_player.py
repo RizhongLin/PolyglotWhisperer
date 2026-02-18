@@ -59,4 +59,9 @@ def play(
     else:
         console.print(f"[bold]Playing:[/bold] {video_path.name}")
 
-    subprocess.run(cmd)
+    proc = subprocess.Popen(cmd)
+    try:
+        proc.wait()
+    except KeyboardInterrupt:
+        proc.terminate()
+        proc.wait(timeout=5)

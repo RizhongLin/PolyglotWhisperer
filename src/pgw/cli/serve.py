@@ -238,7 +238,8 @@ class _WorkspaceHandler(http.server.BaseHTTPRequestHandler):
             self.send_header("Accept-Ranges", "bytes")
             self.end_headers()
             with open(file_path, "rb") as f:
-                self.wfile.write(f.read())
+                while chunk := f.read(1 << 20):  # 1 MB chunks
+                    self.wfile.write(chunk)
 
     def _serve_range(
         self, file_path: Path, file_size: int, content_type: str, range_header: str
@@ -261,7 +262,13 @@ class _WorkspaceHandler(http.server.BaseHTTPRequestHandler):
 
             with open(file_path, "rb") as f:
                 f.seek(start)
-                self.wfile.write(f.read(length))
+                remaining = length
+                while remaining > 0:
+                    chunk = f.read(min(remaining, 1 << 20))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
         except (ValueError, IndexError):
             self.send_error(416)
 

@@ -7,6 +7,7 @@ Backends (selected automatically based on platform):
 
 from __future__ import annotations
 
+import gc
 import platform
 from pathlib import Path
 
@@ -114,4 +115,27 @@ def transcribe(audio_path: Path, config: WhisperConfig):
     seg_count = len(result.segments) if result.segments else 0
     console.print(f"[green]Transcription complete:[/green] {seg_count} segments")
 
+    # Unload model and free GPU memory
+    del model
+    gc.collect()
+    _clear_gpu_cache()
+
     return result
+
+
+def _clear_gpu_cache() -> None:
+    """Release GPU/accelerator memory after model use."""
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except ImportError:
+        pass
+
+    try:
+        import mlx.core as mx
+
+        mx.metal.reset_peak_memory()
+    except (ImportError, AttributeError):
+        pass

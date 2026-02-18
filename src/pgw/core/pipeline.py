@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 from pathlib import Path
 
 from rich.console import Console
@@ -111,6 +112,10 @@ def run_pipeline(
             console.print(f"[green]Saved:[/green] {vtt_path}")
             result.to_txt(str(txt_path))
             console.print(f"[green]Saved:[/green] {txt_path}")
+
+        # Free transcription result to reclaim memory before LLM steps
+        del result
+        gc.collect()
     else:
         console.print("[dim]Transcription found, loading from disk.[/dim]")
         if needs_llm:
@@ -153,6 +158,12 @@ def run_pipeline(
         bi_vtt = paths["bilingual_vtt"]
         save_bilingual_vtt(segments, trans_result.translated, bi_vtt)
         console.print(f"[green]Saved:[/green] {bi_vtt}")
+
+    # Unload Ollama model from GPU if applicable
+    if needs_llm:
+        from pgw.llm.client import unload_ollama_model
+
+        unload_ollama_model(config.llm.provider)
 
     # Step 7: Save metadata
     save_metadata(
