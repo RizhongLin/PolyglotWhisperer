@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-
 from rich.console import Console
 
 from pgw.core.config import LLMConfig
@@ -59,31 +57,31 @@ def ensure_ollama_model(provider: str) -> None:
         console.print(f"[yellow]Failed to pull model {model_name}:[/yellow] {e}")
 
 
-async def acomplete(
+def complete(
     messages: list[dict[str, str]],
     config: LLMConfig,
     **kwargs: object,
 ) -> str:
-    """Send an async chat completion request via LiteLLM.
+    """Send a chat completion request via LiteLLM.
 
     Auto-pulls Ollama models if not available locally.
 
     Args:
         messages: Chat messages in OpenAI format.
         config: LLM configuration.
-        **kwargs: Additional kwargs passed to litellm.acompletion.
+        **kwargs: Additional kwargs passed to litellm.completion.
 
     Returns:
         The assistant's response text.
     """
     try:
-        from litellm import acompletion
+        from litellm import completion
     except ImportError:
         raise ImportError("LiteLLM is not installed. Install with: uv sync --extra llm")
 
     ensure_ollama_model(config.provider)
 
-    response = await acompletion(
+    response = completion(
         model=config.provider,
         messages=messages,
         api_base=config.api_base,
@@ -92,15 +90,6 @@ async def acomplete(
         **kwargs,
     )
     return response.choices[0].message.content
-
-
-def complete(
-    messages: list[dict[str, str]],
-    config: LLMConfig,
-    **kwargs: object,
-) -> str:
-    """Synchronous wrapper around acomplete."""
-    return asyncio.run(acomplete(messages, config, **kwargs))
 
 
 def unload_ollama_model(provider: str) -> None:
