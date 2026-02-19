@@ -55,12 +55,16 @@ def run_pipeline(
     paths = workspace_paths(workspace, language, target_lang=translate)
     console.print(f"[bold]Workspace:[/bold] {workspace}")
 
-    # Copy video into workspace
+    # Link video into workspace (symlink to save disk, copy as fallback)
     video_dest = paths["video"]
-    if not video_dest.is_file():
+    if not video_dest.is_file() and not video_dest.is_symlink():
+        import os
         import shutil
 
-        shutil.copy2(source.video_path, video_dest)
+        try:
+            os.symlink(source.video_path.resolve(), video_dest)
+        except OSError:
+            shutil.copy2(source.video_path, video_dest)
 
     # Step 3: Extract audio
     audio_path = paths["audio"]
