@@ -16,11 +16,11 @@ def test_is_url_local_path():
     assert is_url("video.mp4") is False
 
 
-def test_resolve_local_file(sample_srt: Path):
+def test_resolve_local_file(sample_vtt: Path):
     """Resolve a local file returns VideoSource with the path."""
-    source = resolve(str(sample_srt))
-    assert source.video_path == sample_srt
-    assert source.title == sample_srt.stem
+    source = resolve(str(sample_vtt))
+    assert source.video_path == sample_vtt
+    assert source.title == sample_vtt.stem
     assert source.source_url is None
 
 

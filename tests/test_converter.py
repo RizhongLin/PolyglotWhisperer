@@ -2,10 +2,13 @@
 
 from pathlib import Path
 
+import pytest
+
 from pgw.core.models import SubtitleSegment
 from pgw.subtitles.converter import (
     fix_trailing_clitics,
     load_subtitles,
+    result_to_segments,
     save_bilingual_vtt,
     save_subtitles,
 )
@@ -22,22 +25,6 @@ def test_save_and_load_vtt_roundtrip(tmp_path: Path):
     assert vtt_path.exists()
 
     loaded = load_subtitles(vtt_path)
-    assert len(loaded) == len(segments)
-    for orig, ld in zip(segments, loaded):
-        assert ld.text == orig.text
-
-
-def test_save_and_load_srt_fallback(tmp_path: Path):
-    """SRT still works as a fallback format."""
-    segments = [
-        SubtitleSegment(text="Bonjour", start=1.0, end=4.0),
-        SubtitleSegment(text="Monde", start=4.5, end=8.0),
-    ]
-    srt_path = tmp_path / "test.srt"
-    save_subtitles(segments, srt_path, fmt="srt")
-    assert srt_path.exists()
-
-    loaded = load_subtitles(srt_path)
     assert len(loaded) == len(segments)
     for orig, ld in zip(segments, loaded):
         assert ld.text == orig.text
@@ -72,9 +59,9 @@ def test_save_txt_skips_empty(tmp_path: Path):
     assert len(loaded) == 2
 
 
-def test_load_sample_srt(sample_srt: Path):
-    """Sample SRT fixture loads correctly (fallback format)."""
-    segments = load_subtitles(sample_srt)
+def test_load_sample_vtt(sample_vtt: Path):
+    """Sample VTT fixture loads correctly."""
+    segments = load_subtitles(sample_vtt)
     assert len(segments) > 0
     assert all(seg.text for seg in segments)
 
@@ -99,6 +86,50 @@ def test_bilingual_vtt(tmp_path: Path):
     assert "Hello" in content
     assert "line:85%" in content
     assert "line:5%" in content
+
+
+def test_load_result_from_json(tmp_path: Path):
+    """Load segments from a stable-ts JSON result file via WhisperResult."""
+    import json
+
+    stable_whisper = pytest.importorskip("stable_whisper")
+
+    data = {
+        "segments": [
+            {
+                "text": " Bonjour le monde",
+                "start": 0.0,
+                "end": 2.5,
+                "words": [
+                    {"start": 0.0, "end": 0.8, "word": " Bonjour", "probability": 0.95},
+                    {"start": 0.8, "end": 1.2, "word": " le", "probability": 0.98},
+                    {"start": 1.2, "end": 2.5, "word": " monde", "probability": 0.97},
+                ],
+            },
+            {
+                "text": " Comment allez-vous",
+                "start": 2.5,
+                "end": 5.0,
+                "words": [
+                    {"start": 2.5, "end": 3.2, "word": " Comment", "probability": 0.96},
+                    {"start": 3.2, "end": 4.0, "word": " allez", "probability": 0.94},
+                    {"start": 4.0, "end": 5.0, "word": "-vous", "probability": 0.93},
+                ],
+            },
+        ],
+        "text": " Bonjour le monde Comment allez-vous",
+        "language": "fr",
+    }
+    json_path = tmp_path / "transcription.json"
+    json_path.write_text(json.dumps(data), encoding="utf-8")
+
+    result = stable_whisper.WhisperResult(str(json_path))
+    segments = result_to_segments(result)
+    assert len(segments) == 2
+    assert segments[0].text == "Bonjour le monde"  # stripped
+    assert segments[0].start == 0.0
+    assert segments[0].end == 2.5
+    assert segments[1].text == "Comment allez-vous"
 
 
 def test_fix_trailing_clitics_basic():

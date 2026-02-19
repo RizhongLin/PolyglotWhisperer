@@ -75,10 +75,15 @@ def extract_audio(
             str(sample_rate),  # sample rate
             "-ac",
             "1",  # mono
+            "-map_metadata",
+            "-1",  # strip source metadata
             "-y",  # overwrite
             str(output_path),
         ]
     )
 
-    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    if result.returncode != 0:
+        stderr_msg = result.stderr.decode(errors="replace").strip()
+        raise subprocess.CalledProcessError(result.returncode, cmd, stderr=stderr_msg)
     return output_path

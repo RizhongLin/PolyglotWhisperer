@@ -6,11 +6,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from rich.console import Console
-
 from pgw.core.config import PlayerConfig
-
-console = Console()
+from pgw.utils.console import console
 
 
 def check_mpv() -> bool:
@@ -21,7 +18,6 @@ def check_mpv() -> bool:
 def play(
     video_path: Path,
     primary_subs: Path | None = None,
-    secondary_subs: Path | None = None,
     bilingual_subs: Path | None = None,
     config: PlayerConfig | None = None,
 ) -> None:
@@ -34,7 +30,6 @@ def play(
     Args:
         video_path: Path to the video file.
         primary_subs: Path to primary subtitle file (original language).
-        secondary_subs: Unused, kept for API compatibility.
         bilingual_subs: Path to bilingual VTT with positioning cues.
         config: Player configuration.
     """
@@ -64,4 +59,8 @@ def play(
         proc.wait()
     except KeyboardInterrupt:
         proc.terminate()
-        proc.wait(timeout=5)
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()

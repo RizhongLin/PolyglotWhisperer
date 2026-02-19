@@ -5,14 +5,11 @@ from __future__ import annotations
 import gc
 from pathlib import Path
 
-from rich.console import Console
-
 from pgw.core.config import PGWConfig
 from pgw.downloader.resolver import is_url, resolve
 from pgw.utils.audio import extract_audio
+from pgw.utils.console import console
 from pgw.utils.paths import create_workspace, save_metadata, workspace_paths
-
-console = Console()
 
 
 def run_pipeline(
@@ -86,90 +83,111 @@ def run_pipeline(
     else:
         console.print("[dim]Audio already extracted, skipping.[/dim]")
 
-    # Step 4: Transcribe
+    # Step 4: Transcribe (with resume support)
     vtt_path = paths["transcription_vtt"]
     txt_path = paths["transcription_txt"]
     json_path = workspace / "transcription.json"
     needs_llm = (cleanup and config.llm.cleanup_enabled) or translate
+    llm_was_used = False
 
     if not vtt_path.is_file():
-        from pgw.transcriber.stable_ts import transcribe
+        if json_path.is_file() and needs_llm:
+            # Resume: transcription JSON cached from interrupted run
+            console.print("[dim]Transcription JSON found, loading segments...[/dim]")
+            import stable_whisper
 
-        result = transcribe(audio_path, config.whisper)
+            from pgw.subtitles.converter import result_to_segments
 
-        # Save full result as JSON for reprocessing
-        result.save_as_json(str(json_path))
-        console.print(f"[green]Saved:[/green] {json_path}")
-
-        if needs_llm:
-            # Convert to SubtitleSegments for LLM processing
-            from pgw.subtitles.converter import fix_trailing_clitics, result_to_segments
-
+            result = stable_whisper.WhisperResult(str(json_path))
             segments = result_to_segments(result)
-            if language == "fr":
-                segments = fix_trailing_clitics(segments)
+            del result
         else:
-            # Use stable-ts built-in export — auto-detects VTT from extension
-            result.to_srt_vtt(str(vtt_path))
-            console.print(f"[green]Saved:[/green] {vtt_path}")
-            result.to_txt(str(txt_path))
-            console.print(f"[green]Saved:[/green] {txt_path}")
+            from pgw.transcriber.stable_ts import transcribe
 
-        # Free transcription result to reclaim memory before LLM steps
-        del result
-        gc.collect()
-    else:
-        console.print("[dim]Transcription found, loading from disk.[/dim]")
+            result = transcribe(audio_path, config.whisper)
+
+            # Save full result as JSON for reprocessing
+            result.save_as_json(str(json_path))
+            console.print(f"[green]Saved:[/green] {json_path}")
+
+            if needs_llm:
+                from pgw.subtitles.converter import result_to_segments
+
+                segments = result_to_segments(result)
+            else:
+                # Use stable-ts built-in export — auto-detects VTT from extension
+                result.to_srt_vtt(str(vtt_path))
+                console.print(f"[green]Saved:[/green] {vtt_path}")
+                result.to_txt(str(txt_path))
+                console.print(f"[green]Saved:[/green] {txt_path}")
+
+            # Free transcription result to reclaim memory before LLM steps
+            del result
+            gc.collect()
+
+        # LLM processing for fresh segments (cleanup + save)
         if needs_llm:
-            from pgw.subtitles.converter import fix_trailing_clitics, load_subtitles
+            from pgw.subtitles.converter import save_subtitles
+
+            if language == "fr":
+                from pgw.subtitles.converter import fix_trailing_clitics
+
+                segments = fix_trailing_clitics(segments)
+
+            if cleanup and config.llm.cleanup_enabled:
+                from pgw.llm.cleanup import cleanup_subtitles
+
+                console.print("[bold]Cleaning up transcription...[/bold]")
+                segments = cleanup_subtitles(segments, language, config.llm)
+                llm_was_used = True
+
+            save_subtitles(segments, vtt_path, fmt="vtt")
+            console.print(f"[green]Saved:[/green] {vtt_path}")
+            save_subtitles(segments, txt_path, fmt="txt")
+            console.print(f"[green]Saved:[/green] {txt_path}")
+    else:
+        console.print("[dim]Transcription found, skipping.[/dim]")
+        if needs_llm:
+            from pgw.subtitles.converter import load_subtitles
 
             segments = load_subtitles(vtt_path)
             if language == "fr":
+                from pgw.subtitles.converter import fix_trailing_clitics
+
                 segments = fix_trailing_clitics(segments)
 
-    # Step 5: LLM cleanup + save (only when LLM is involved)
-    if needs_llm:
-        if cleanup and config.llm.cleanup_enabled:
-            from pgw.llm.cleanup import cleanup_subtitles
-
-            console.print("[bold]Cleaning up transcription...[/bold]")
-            segments = cleanup_subtitles(segments, language, config.llm)
-
-        from pgw.subtitles.converter import save_subtitles
-
-        save_subtitles(segments, vtt_path, fmt="vtt")
-        console.print(f"[green]Saved:[/green] {vtt_path}")
-        save_subtitles(segments, txt_path, fmt="txt")
-        console.print(f"[green]Saved:[/green] {txt_path}")
-
-    # Step 6: Optional translation
+    # Step 5: Optional translation
     if translate:
-        from pgw.llm.translator import translate_subtitles
-        from pgw.subtitles.converter import save_bilingual_vtt, save_subtitles
-
-        console.print(f"[bold]Translating to {translate}...[/bold]")
-        trans_result = translate_subtitles(segments, language, translate, config.llm)
-
         trans_vtt = paths["translation_vtt"]
-        save_subtitles(trans_result.translated, trans_vtt, fmt="vtt")
-        console.print(f"[green]Saved:[/green] {trans_vtt}")
+        if not trans_vtt.is_file():
+            from pgw.llm.translator import translate_subtitles
+            from pgw.subtitles.converter import save_bilingual_vtt, save_subtitles
 
-        trans_txt = paths["translation_txt"]
-        save_subtitles(trans_result.translated, trans_txt, fmt="txt")
-        console.print(f"[green]Saved:[/green] {trans_txt}")
+            console.print(f"[bold]Translating to {translate}...[/bold]")
+            trans_result = translate_subtitles(segments, language, translate, config.llm)
+            llm_was_used = True
 
-        # Bilingual VTT: original at bottom, translation at top
-        bi_vtt = paths["bilingual_vtt"]
-        save_bilingual_vtt(segments, trans_result.translated, bi_vtt)
-        console.print(f"[green]Saved:[/green] {bi_vtt}")
+            save_subtitles(trans_result.translated, trans_vtt, fmt="vtt")
+            console.print(f"[green]Saved:[/green] {trans_vtt}")
 
-    # Unload Ollama model from GPU if applicable
-    if needs_llm:
+            trans_txt = paths["translation_txt"]
+            save_subtitles(trans_result.translated, trans_txt, fmt="txt")
+            console.print(f"[green]Saved:[/green] {trans_txt}")
+
+            # Bilingual VTT: original at bottom, translation at top
+            bi_vtt = paths["bilingual_vtt"]
+            save_bilingual_vtt(segments, trans_result.translated, bi_vtt)
+            console.print(f"[green]Saved:[/green] {bi_vtt}")
+        else:
+            console.print("[dim]Translation found, skipping.[/dim]")
+
+    # Unload Ollama model from GPU only if LLM was actually used
+    if llm_was_used:
         from pgw.llm.client import unload_ollama_model
 
         unload_ollama_model(config.llm.provider)
 
-    # Step 7: Save metadata
+    # Step 6: Save metadata
     save_metadata(
         workspace,
         source_url=source.source_url,
@@ -185,7 +203,7 @@ def run_pipeline(
         source_duration=source.duration,
     )
 
-    # Step 8: Optional playback
+    # Step 7: Optional playback
     if play:
         from pgw.player.mpv_player import check_mpv
         from pgw.player.mpv_player import play as mpv_play

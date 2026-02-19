@@ -52,12 +52,9 @@ def run(
     ] = None,
 ) -> None:
     """Run the full pipeline: download, transcribe, translate, and play."""
-    from rich.console import Console
-
     from pgw.core.languages import validate_language
     from pgw.core.pipeline import run_pipeline
-
-    _console = Console()
+    from pgw.utils.console import console as _console
 
     try:
         validate_language(language)

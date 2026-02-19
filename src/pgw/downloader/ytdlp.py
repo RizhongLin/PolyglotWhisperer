@@ -6,12 +6,10 @@ import hashlib
 import json
 from pathlib import Path
 
-from rich.console import Console
 from rich.progress import BarColumn, Progress, TaskID, TextColumn, TimeRemainingColumn
 
 from pgw.core.models import VideoSource
-
-console = Console()
+from pgw.utils.console import console
 
 _DEFAULT_FORMAT = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
 _MANIFEST_NAME = ".downloads.jsonl"
@@ -71,7 +69,12 @@ def _find_cached(url: str, output_dir: Path) -> VideoSource | None:
         cached_path = Path(path_str)
         if not cached_path.is_file():
             continue
-        # Verify file integrity — reject if content was overwritten
+        # Quick size check before expensive hash verification
+        expected_size = entry.get("size_bytes")
+        if expected_size is not None and cached_path.stat().st_size != expected_size:
+            console.print(f"[yellow]Cache stale (size mismatch):[/yellow] {cached_path}")
+            continue
+        # Full hash verification only if size matches
         expected_hash = entry.get("sha256")
         if expected_hash and _sha256(cached_path) != expected_hash:
             console.print(f"[yellow]Cache stale (hash mismatch):[/yellow] {cached_path}")
@@ -94,6 +97,8 @@ def download(
     """Download a video from URL using yt-dlp.
 
     Checks a local manifest first to avoid re-downloading the same URL.
+    Uses single-pass extract_info(download=True) and yt-dlp's
+    prepare_filename for exact output path resolution.
 
     Args:
         url: Video URL.
@@ -142,38 +147,31 @@ def download(
         "no_warnings": True,
     }
 
-    console.print(f"[bold]Fetching info:[/bold] {url}")
+    console.print(f"[bold]Downloading:[/bold] {url}")
 
     with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(url, download=False)
+        with progress:
+            info = ydl.extract_info(url, download=True)
+
         title = info.get("title", "video")
-        video_id = info.get("id", "")
         duration = info.get("duration")
 
-        console.print(f"[bold]Title:[/bold] {title}")
-        with progress:
-            ydl.download([url])
+        # Use yt-dlp's own path resolution for exact output filename
+        video_path = Path(ydl.prepare_filename(info))
 
-    # Find the downloaded file (title_id.ext pattern)
-    if video_id:
-        glob_pattern = f"{_sanitize_title(title)}_{video_id}.*"
-    else:
-        glob_pattern = f"{_sanitize_title(title)}.*"
-    downloaded_files = sorted(
-        output_dir.glob(glob_pattern), key=lambda p: p.stat().st_mtime, reverse=True
-    )
-    if not downloaded_files:
-        # Fallback: find most recent file in output_dir
-        downloaded_files = sorted(
+    # Verify the file exists (handle edge cases like format merging)
+    if not video_path.is_file():
+        # Fallback: most recent non-hidden file in output_dir
+        candidates = sorted(
             (p for p in output_dir.iterdir() if not p.name.startswith(".")),
             key=lambda p: p.stat().st_mtime,
             reverse=True,
         )
+        if not candidates:
+            raise RuntimeError(f"Download completed but no file found in {output_dir}")
+        video_path = candidates[0]
 
-    if not downloaded_files:
-        raise RuntimeError(f"Download completed but no file found in {output_dir}")
-
-    video_path = downloaded_files[0]
+    console.print(f"[bold]Title:[/bold] {title}")
     console.print(f"[green]Downloaded:[/green] {video_path}")
 
     # Compute hash and save to manifest
@@ -200,21 +198,3 @@ def download(
         title=title,
         duration=duration,
     )
-
-
-def extract_info(url: str) -> dict:
-    """Get video metadata without downloading."""
-    try:
-        import yt_dlp
-    except ImportError:
-        raise ImportError("yt-dlp is not installed. Install with: uv sync --extra download")
-
-    opts = {"quiet": True, "no_warnings": True}
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        return ydl.extract_info(url, download=False)
-
-
-def _sanitize_title(title: str) -> str:
-    """Rough sanitization to match yt-dlp's filename output."""
-    keep = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .-_()")
-    return "".join(c if c in keep else "_" for c in title)

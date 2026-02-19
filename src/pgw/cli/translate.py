@@ -6,12 +6,10 @@ from pathlib import Path
 from typing import Annotated, Optional
 
 import typer
-from rich.console import Console
 
 from pgw.core.config import load_config
 from pgw.subtitles.converter import load_subtitles, save_subtitles
-
-console = Console()
+from pgw.utils.console import console
 
 
 def translate(

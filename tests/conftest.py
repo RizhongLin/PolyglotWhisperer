@@ -13,5 +13,5 @@ def fixtures_dir() -> Path:
 
 
 @pytest.fixture
-def sample_srt(fixtures_dir: Path) -> Path:
-    return fixtures_dir / "sample.srt"
+def sample_vtt(fixtures_dir: Path) -> Path:
+    return fixtures_dir / "sample.vtt"

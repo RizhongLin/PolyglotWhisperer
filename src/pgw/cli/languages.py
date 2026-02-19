@@ -5,12 +5,10 @@ from __future__ import annotations
 from typing import Annotated
 
 import typer
-from rich.console import Console
 from rich.table import Table
 
 from pgw.core.languages import ALIGNMENT_LANGUAGES, WHISPER_LANGUAGES
-
-console = Console()
+from pgw.utils.console import console
 
 
 def languages(

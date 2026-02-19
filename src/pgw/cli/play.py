@@ -6,11 +6,9 @@ from pathlib import Path
 from typing import Annotated, Optional
 
 import typer
-from rich.console import Console
 
 from pgw.core.config import load_config
-
-console = Console()
+from pgw.utils.console import console
 
 
 def play(

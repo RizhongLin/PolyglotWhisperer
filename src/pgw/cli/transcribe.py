@@ -6,13 +6,11 @@ from pathlib import Path
 from typing import Annotated, Optional
 
 import typer
-from rich.console import Console
 
 from pgw.core.config import load_config
 from pgw.downloader.resolver import is_url, resolve
 from pgw.utils.audio import extract_audio
-
-console = Console()
+from pgw.utils.console import console
 
 
 def transcribe(
@@ -114,6 +112,10 @@ def transcribe(
         from pgw.subtitles.converter import result_to_segments, save_subtitles
 
         segments = result_to_segments(result)
+        if language == "fr":
+            from pgw.subtitles.converter import fix_trailing_clitics
+
+            segments = fix_trailing_clitics(segments)
         console.print("[bold]Cleaning up with LLM...[/bold]")
         segments = cleanup_subtitles(segments, language, config.llm)
         save_subtitles(segments, sub_path, fmt=fmt)

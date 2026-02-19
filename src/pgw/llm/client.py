@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-from rich.console import Console
-
 from pgw.core.config import LLMConfig
-
-console = Console()
+from pgw.utils.console import console
 
 
 def _extract_ollama_model(provider: str) -> str | None:
@@ -81,15 +78,25 @@ def complete(
 
     ensure_ollama_model(config.provider)
 
-    response = completion(
-        model=config.provider,
-        messages=messages,
-        api_base=config.api_base,
-        temperature=config.temperature,
-        max_tokens=config.max_tokens,
+    # Only pass api_base for Ollama providers — other providers use their own endpoints
+    call_kwargs: dict = {
+        "model": config.provider,
+        "messages": messages,
+        "temperature": config.temperature,
+        "max_tokens": config.max_tokens,
         **kwargs,
-    )
-    return response.choices[0].message.content
+    }
+    if _extract_ollama_model(config.provider) is not None and config.api_base:
+        call_kwargs["api_base"] = config.api_base
+
+    response = completion(**call_kwargs)
+
+    if not response.choices:
+        raise RuntimeError("LLM returned empty response (no choices)")
+    content = response.choices[0].message.content
+    if content is None:
+        raise RuntimeError("LLM returned None content")
+    return content
 
 
 def unload_ollama_model(provider: str) -> None:

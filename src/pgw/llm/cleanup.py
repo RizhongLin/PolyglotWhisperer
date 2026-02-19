@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from pgw.core.config import LLMConfig
@@ -14,8 +13,7 @@ from pgw.llm.prompts import (
     format_numbered_segments,
     parse_numbered_response,
 )
-
-console = Console()
+from pgw.utils.console import console
 
 CHUNK_SIZE = 20
 OVERLAP = 2  # Context overlap between chunks for coherence

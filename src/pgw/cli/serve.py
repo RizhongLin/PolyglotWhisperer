@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import functools
 import http.server
+import mimetypes
 import urllib.parse
 import webbrowser
 from pathlib import Path
 from typing import Annotated, Optional
 
 import typer
-from rich.console import Console
 
-console = Console()
+from pgw.utils.console import console
 
 PLAYER_HTML = """\
 <!DOCTYPE html>
@@ -177,6 +177,7 @@ def serve(
         server.serve_forever()
     except KeyboardInterrupt:
         console.print("\n[bold]Stopped.[/bold]")
+    finally:
         server.server_close()
 
 
@@ -214,16 +215,12 @@ class _WorkspaceHandler(http.server.BaseHTTPRequestHandler):
             self.send_error(404)
             return
 
-        content_types = {
-            ".mp4": "video/mp4",
-            ".webm": "video/webm",
-            ".vtt": "text/vtt; charset=utf-8",
-            ".srt": "text/plain; charset=utf-8",
-            ".txt": "text/plain; charset=utf-8",
-            ".json": "application/json; charset=utf-8",
-            ".wav": "audio/wav",
-        }
-        content_type = content_types.get(file_path.suffix, "application/octet-stream")
+        content_type, _ = mimetypes.guess_type(file_path.name)
+        if content_type is None:
+            content_type = "application/octet-stream"
+        # Add charset for text-based formats
+        if file_path.suffix in (".vtt", ".srt", ".txt", ".json"):
+            content_type = f"{content_type}; charset=utf-8"
 
         file_size = file_path.stat().st_size
 
@@ -251,7 +248,7 @@ class _WorkspaceHandler(http.server.BaseHTTPRequestHandler):
             start = int(start_str) if start_str else 0
             end = int(end_str) if end_str else file_size - 1
             end = min(end, file_size - 1)
-            if start < 0 or end < 0 or start > end:
+            if start < 0 or end < 0 or start > end or start >= file_size:
                 self.send_error(416)
                 return
             length = end - start + 1

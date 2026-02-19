@@ -11,11 +11,8 @@ import gc
 import platform
 from pathlib import Path
 
-from rich.console import Console
-
 from pgw.core.config import WhisperConfig
-
-console = Console()
+from pgw.utils.console import console
 
 
 def _is_apple_silicon() -> bool:
@@ -136,6 +133,9 @@ def _clear_gpu_cache() -> None:
     try:
         import mlx.core as mx
 
-        mx.metal.reset_peak_memory()
+        if hasattr(mx, "reset_peak_memory"):
+            mx.reset_peak_memory()
+        else:
+            mx.metal.reset_peak_memory()
     except (ImportError, AttributeError):
         pass
