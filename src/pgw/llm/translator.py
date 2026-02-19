@@ -62,16 +62,20 @@ def translate_subtitles(
         for i in range(0, len(segments), chunk_size):
             chunk = segments[i : i + chunk_size]
 
-            # Include overlap context from previous chunk (not included in output)
-            context_start = max(0, i - OVERLAP)
-            context_segments = segments[context_start:i]
+            # Include overlap context from surrounding segments (not included in output)
+            before = segments[max(0, i - OVERLAP) : i]
+            after = segments[i + chunk_size : i + chunk_size + OVERLAP]
+            context_parts = []
+            if before:
+                context_parts.append("\n".join(f"[preceding context] {seg.text}" for seg in before))
+            if after:
+                context_parts.append("\n".join(f"[following context] {seg.text}" for seg in after))
             context_prefix = ""
-            if context_segments:
-                context_lines = [f"[context] {seg.text}" for seg in context_segments]
+            if context_parts:
                 context_prefix = (
-                    "For context, here are the preceding lines (do NOT translate these, "
-                    "they are just for context):\n"
-                    + "\n".join(context_lines)
+                    "For context only (do NOT translate these, "
+                    "they are just for reference):\n"
+                    + "\n".join(context_parts)
                     + "\n\nNow translate these:\n"
                 )
 

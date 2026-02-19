@@ -4,6 +4,7 @@ from pathlib import Path
 
 from pgw.core.models import SubtitleSegment
 from pgw.subtitles.converter import (
+    fix_trailing_clitics,
     load_subtitles,
     save_bilingual_vtt,
     save_subtitles,
@@ -98,3 +99,87 @@ def test_bilingual_vtt(tmp_path: Path):
     assert "Hello" in content
     assert "line:85%" in content
     assert "line:5%" in content
+
+
+def test_fix_trailing_clitics_basic():
+    """Trailing l' is moved to next segment."""
+    segments = [
+        SubtitleSegment(text="C'est de l'", start=0.0, end=2.0),
+        SubtitleSegment(text="école primaire", start=2.0, end=4.0),
+    ]
+    fixed = fix_trailing_clitics(segments)
+    assert len(fixed) == 2
+    assert fixed[0].text == "C'est de"
+    assert fixed[1].text == "l'école primaire"
+
+
+def test_fix_trailing_clitics_multiple():
+    """Handles d', qu', j' and other clitics."""
+    segments = [
+        SubtitleSegment(text="Il parle d'", start=0.0, end=1.5),
+        SubtitleSegment(text="abord de qu'", start=1.5, end=3.0),
+        SubtitleSegment(text="est-ce que", start=3.0, end=4.5),
+    ]
+    fixed = fix_trailing_clitics(segments)
+    assert fixed[0].text == "Il parle"
+    assert fixed[1].text == "d'abord de"
+    assert fixed[2].text == "qu'est-ce que"
+
+
+def test_fix_trailing_clitics_no_match():
+    """Segments without trailing clitics are unchanged."""
+    segments = [
+        SubtitleSegment(text="Bonjour tout le monde", start=0.0, end=2.0),
+        SubtitleSegment(text="Comment allez-vous", start=2.0, end=4.0),
+    ]
+    fixed = fix_trailing_clitics(segments)
+    assert fixed[0].text == "Bonjour tout le monde"
+    assert fixed[1].text == "Comment allez-vous"
+
+
+def test_fix_trailing_clitics_empty_after_removal():
+    """Segment that becomes empty after clitic removal is dropped."""
+    segments = [
+        SubtitleSegment(text="l'", start=0.0, end=0.5),
+        SubtitleSegment(text="école", start=0.5, end=2.0),
+    ]
+    fixed = fix_trailing_clitics(segments)
+    assert len(fixed) == 1
+    assert fixed[0].text == "l'école"
+
+
+def test_fix_trailing_clitics_curly_apostrophe():
+    """Curly apostrophe (\u2019) is handled the same as straight."""
+    segments = [
+        SubtitleSegment(text="C\u2019est de l\u2019", start=0.0, end=2.0),
+        SubtitleSegment(text="\u00e9cole", start=2.0, end=4.0),
+    ]
+    fixed = fix_trailing_clitics(segments)
+    assert fixed[0].text == "C\u2019est de"
+    assert fixed[1].text == "l\u2019\u00e9cole"
+
+
+def test_fix_trailing_clitics_split_apostrophe():
+    """Case 2: letter at end, apostrophe starts next segment."""
+    segments = [
+        SubtitleSegment(text="C'est de l", start=0.0, end=2.0),
+        SubtitleSegment(text="'\u00e9cole primaire", start=2.0, end=4.0),
+    ]
+    fixed = fix_trailing_clitics(segments)
+    assert fixed[0].text == "C'est de"
+    assert fixed[1].text == "l'\u00e9cole primaire"
+
+
+def test_fix_trailing_clitics_three_way_split():
+    """Case 3: letter / apostrophe / word across three segments."""
+    segments = [
+        SubtitleSegment(text="de l", start=0.0, end=1.0),
+        SubtitleSegment(text="'", start=1.0, end=1.2),
+        SubtitleSegment(text="\u00e9cole", start=1.2, end=3.0),
+    ]
+    fixed = fix_trailing_clitics(segments)
+    # Pass 1: "l" merges with "'" → ["de", "l'", "école"]
+    # Pass 2: "l'" merges with "école" → ["de", "l'école"]
+    assert len(fixed) == 2
+    assert fixed[0].text == "de"
+    assert fixed[1].text == "l'\u00e9cole"

@@ -103,9 +103,11 @@ def run_pipeline(
 
         if needs_llm:
             # Convert to SubtitleSegments for LLM processing
-            from pgw.subtitles.converter import result_to_segments
+            from pgw.subtitles.converter import fix_trailing_clitics, result_to_segments
 
             segments = result_to_segments(result)
+            if language == "fr":
+                segments = fix_trailing_clitics(segments)
         else:
             # Use stable-ts built-in export — auto-detects VTT from extension
             result.to_srt_vtt(str(vtt_path))
@@ -119,9 +121,11 @@ def run_pipeline(
     else:
         console.print("[dim]Transcription found, loading from disk.[/dim]")
         if needs_llm:
-            from pgw.subtitles.converter import load_subtitles
+            from pgw.subtitles.converter import fix_trailing_clitics, load_subtitles
 
             segments = load_subtitles(vtt_path)
+            if language == "fr":
+                segments = fix_trailing_clitics(segments)
 
     # Step 5: LLM cleanup + save (only when LLM is involved)
     if needs_llm:

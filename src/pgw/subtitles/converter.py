@@ -9,11 +9,27 @@ save_as_json) directly. This module handles:
 
 from __future__ import annotations
 
+import copy
+import re
 from pathlib import Path
 
 import pysubs2
 
 from pgw.core.models import SubtitleSegment
+
+# French elision clitics — Whisper tokenizes "l'école" as ['l', "'", 'école'],
+# so clitics can be split across segments in multiple ways:
+#   Case 1: "...de l'" / "école"       — clitic+apostrophe at end
+#   Case 2: "...de l"  / "'école"      — letter at end, apostrophe on next
+#   Case 3: "...de l"  / "'" / "école" — three-way split (fixed by two passes)
+# Supports both straight (') and curly (\u2019) apostrophes.
+_APOSTROPHE = "'\u2019"
+
+# Case 1: trailing clitic with apostrophe (e.g. "de l'" or "qu'")
+_TRAILING_CLITIC_RE = re.compile(r"(?:^|\s)(\S*(?:qu|[ljdnscmt])['\u2019])\s*$", re.IGNORECASE)
+
+# Case 2: trailing clitic letter without apostrophe, next starts with apostrophe
+_TRAILING_LETTER_RE = re.compile(r"(?:^|\s)(\S*(?:qu|[ljdnscmt]))\s*$", re.IGNORECASE)
 
 
 def result_to_segments(result) -> list[SubtitleSegment]:
@@ -28,6 +44,46 @@ def result_to_segments(result) -> list[SubtitleSegment]:
             )
         )
     return segments
+
+
+def fix_trailing_clitics(segments: list[SubtitleSegment]) -> list[SubtitleSegment]:
+    """Move trailing French clitics (l', d', qu', etc.) to the next segment.
+
+    Handles multiple split patterns from Whisper's tokenizer:
+    - "...de l'" / "école"  (clitic+apostrophe at end)
+    - "...de l" / "'école"  (letter at end, apostrophe starts next)
+    - "...de l" / "'" / "école"  (three-way split, fixed by two passes)
+    """
+    if not segments:
+        return segments
+
+    fixed = [copy.copy(seg) for seg in segments]
+
+    # Two passes to handle three-way splits (l / ' / école → l' / école → l'école)
+    for _ in range(2):
+        for i in range(len(fixed) - 1):
+            cur_text = fixed[i].text
+            next_text = fixed[i + 1].text
+
+            # Case 1: trailing clitic with apostrophe (e.g. "de l'")
+            match = _TRAILING_CLITIC_RE.search(cur_text)
+            if match:
+                clitic = match.group(1).strip()
+                fixed[i].text = cur_text[: match.start()].rstrip()
+                fixed[i + 1].text = clitic + next_text
+                continue
+
+            # Case 2: trailing letter + next starts with apostrophe
+            if next_text and next_text[0] in _APOSTROPHE:
+                match = _TRAILING_LETTER_RE.search(cur_text)
+                if match:
+                    letter = match.group(1).strip()
+                    fixed[i].text = cur_text[: match.start()].rstrip()
+                    fixed[i + 1].text = letter + next_text
+                    continue
+
+    # Remove segments that became empty after clitic removal
+    return [seg for seg in fixed if seg.text.strip()]
 
 
 def save_subtitles(segments: list[SubtitleSegment], path: Path, fmt: str = "vtt") -> Path:

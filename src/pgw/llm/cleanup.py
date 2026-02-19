@@ -18,6 +18,7 @@ from pgw.llm.prompts import (
 console = Console()
 
 CHUNK_SIZE = 20
+OVERLAP = 2  # Context overlap between chunks for coherence
 
 
 def cleanup_subtitles(
@@ -28,7 +29,7 @@ def cleanup_subtitles(
 ) -> list[SubtitleSegment]:
     """Clean up subtitle segments using an LLM.
 
-    Processes segments in chunks to stay within context limits.
+    Processes segments in chunks with overlap for context coherence.
     Preserves all timestamps — only text is modified.
 
     Args:
@@ -55,6 +56,25 @@ def cleanup_subtitles(
             chunk = segments[i : i + chunk_size]
             texts = [seg.text for seg in chunk]
 
+            # Build context from surrounding segments (not included in output)
+            context_parts = []
+            before = segments[max(0, i - OVERLAP) : i]
+            after = segments[i + chunk_size : i + chunk_size + OVERLAP]
+            if before:
+                before_lines = [f"[preceding context] {seg.text}" for seg in before]
+                context_parts.append("\n".join(before_lines))
+            if after:
+                after_lines = [f"[following context] {seg.text}" for seg in after]
+                context_parts.append("\n".join(after_lines))
+
+            context_prefix = ""
+            if context_parts:
+                context_prefix = (
+                    "For context only (do NOT clean these, they are just for reference):\n"
+                    + "\n".join(context_parts)
+                    + "\n\nNow clean these:\n"
+                )
+
             numbered = format_numbered_segments(texts)
             messages = [
                 {"role": "system", "content": CLEANUP_SYSTEM},
@@ -63,7 +83,7 @@ def cleanup_subtitles(
                     "content": CLEANUP_USER.format(
                         count=len(texts),
                         language=language,
-                        numbered_segments=numbered,
+                        numbered_segments=context_prefix + numbered,
                     ),
                 },
             ]
