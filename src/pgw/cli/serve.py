@@ -251,6 +251,9 @@ class _WorkspaceHandler(http.server.BaseHTTPRequestHandler):
             start = int(start_str) if start_str else 0
             end = int(end_str) if end_str else file_size - 1
             end = min(end, file_size - 1)
+            if start < 0 or end < 0 or start > end:
+                self.send_error(416)
+                return
             length = end - start + 1
 
             self.send_response(206)

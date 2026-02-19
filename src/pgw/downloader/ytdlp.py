@@ -37,15 +37,19 @@ def _sha256(path: Path) -> str:
 
 
 def _load_manifest(output_dir: Path) -> list[dict]:
-    """Load the download manifest (JSONL)."""
+    """Load the download manifest (JSONL), skipping corrupt entries."""
     manifest_path = output_dir / _MANIFEST_NAME
     if not manifest_path.is_file():
         return []
     entries = []
     for line in manifest_path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
-        if line:
+        if not line:
+            continue
+        try:
             entries.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
     return entries
 
 
@@ -59,22 +63,26 @@ def _append_manifest(output_dir: Path, entry: dict) -> None:
 def _find_cached(url: str, output_dir: Path) -> VideoSource | None:
     """Check if a URL has already been downloaded and the file is intact."""
     for entry in _load_manifest(output_dir):
-        if entry.get("url") == url:
-            cached_path = Path(entry["path"])
-            if not cached_path.is_file():
-                continue
-            # Verify file integrity — reject if content was overwritten
-            expected_hash = entry.get("sha256")
-            if expected_hash and _sha256(cached_path) != expected_hash:
-                console.print(f"[yellow]Cache stale (hash mismatch):[/yellow] {cached_path}")
-                continue
-            console.print(f"[dim]Found cached download:[/dim] {cached_path}")
-            return VideoSource(
-                video_path=cached_path,
-                source_url=url,
-                title=entry.get("title", cached_path.stem),
-                duration=entry.get("duration"),
-            )
+        if entry.get("url") != url:
+            continue
+        path_str = entry.get("path")
+        if not path_str:
+            continue
+        cached_path = Path(path_str)
+        if not cached_path.is_file():
+            continue
+        # Verify file integrity — reject if content was overwritten
+        expected_hash = entry.get("sha256")
+        if expected_hash and _sha256(cached_path) != expected_hash:
+            console.print(f"[yellow]Cache stale (hash mismatch):[/yellow] {cached_path}")
+            continue
+        console.print(f"[dim]Found cached download:[/dim] {cached_path}")
+        return VideoSource(
+            video_path=cached_path,
+            source_url=url,
+            title=entry.get("title", cached_path.stem),
+            duration=entry.get("duration"),
+        )
     return None
 
 

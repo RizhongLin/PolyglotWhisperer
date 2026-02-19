@@ -75,7 +75,7 @@ def save_bilingual_vtt(
     path.parent.mkdir(parents=True, exist_ok=True)
 
     lines = ["WEBVTT", ""]
-    for i, (orig, trans) in enumerate(zip(original, translated), 1):
+    for i, (orig, trans) in enumerate(zip(original, translated, strict=True), 1):
         start = _format_vtt_time(orig.start)
         end = _format_vtt_time(orig.end)
 
