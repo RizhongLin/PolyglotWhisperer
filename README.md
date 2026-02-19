@@ -1,18 +1,19 @@
 # PolyglotWhisperer
 
-Video transcription and translation tool for language learners. Transcribe videos with word-level accuracy using Whisper, clean up and translate subtitles with local or cloud LLMs, and play with dual-language subtitles.
+Video and audio transcription and translation tool for language learners. Transcribe media with word-level accuracy using Whisper, clean up and translate subtitles with local or cloud LLMs, and play with dual-language subtitles.
 
-Built for watching foreign-language media (like Swiss French news from RTS) with accurate, word-for-word subtitles and their translations side by side.
+Built for watching foreign-language media with accurate, word-for-word subtitles and their translations side by side.
 
 ## Features
 
 - **Accurate transcription** — Word-level timestamps via stable-ts (MLX on Apple Silicon, CUDA/CPU elsewhere)
+- **Smart subtitle segmentation** — Custom regrouping by punctuation, gaps, and length; spaCy POS tagging moves dangling articles/prepositions across 24 languages
 - **LLM-powered cleanup** — Fix ASR errors, remove filler words, normalize punctuation
 - **LLM translation** — Translate subtitles to any language using local (Ollama) or cloud LLMs
 - **Dual subtitle playback** — Watch videos with original + translated subtitles simultaneously
 - **Bilingual subtitles** — Single VTT file with original at bottom + translation at top, works in any player
 - **Multiple output formats** — VTT (default), SRT, ASS, and plain text
-- **URL support** — Download and process videos from RTS, SRF, and other sites via yt-dlp
+- **URL support** — Download and process videos from YouTube and other sites via yt-dlp
 - **Local-first** — Runs entirely offline with Ollama + Whisper, no cloud APIs required
 
 ## Quick Start
@@ -23,38 +24,42 @@ Built for watching foreign-language media (like Swiss French news from RTS) with
 - [uv](https://docs.astral.sh/uv/) (package manager)
 - [ffmpeg](https://ffmpeg.org/) (audio extraction)
 - [mpv](https://mpv.io/) (video playback, optional)
-- [Ollama](https://ollama.com/) (local LLM, optional)
+- [Ollama](https://ollama.com/) (local LLM, optional — for cleanup and translation)
 
 ```bash
 # macOS
-brew install ffmpeg mpv
+brew install uv ffmpeg mpv
+brew install --cask ollama   # optional
 
 # Ubuntu/Debian
 sudo apt install ffmpeg mpv
+curl -fsSL https://astral.sh/uv/install.sh | sh           # uv
+curl -fsSL https://ollama.com/install.sh | sh             # optional
 ```
 
 ### Installation
 
 ```bash
-# Clone and install
 git clone https://github.com/RizhongLin/PolyglotWhisperer.git
 cd PolyglotWhisperer
 uv sync --all-extras
 
-# Pull a local LLM for translation (optional)
+# Pull a local LLM for cleanup/translation (optional)
 ollama pull qwen3:8b
 ```
+
+> **Note:** spaCy language models (for subtitle segmentation) are downloaded automatically on first use.
 
 ### Usage
 
 ```bash
 # Full pipeline: download, transcribe, translate
-pgw run "https://www.rts.ch/play/tv/..." --translate en --no-play
+pgw run "https://example.com/video" --translate en --no-play
 
 # Play from workspace (auto-detects video + bilingual subtitles)
-pgw play pgw_workspace/19h30/20260217_164802/
+pgw play pgw_workspace/my-video/20260217_164802/
 
-# Transcribe a local video
+# Transcribe a local video or audio file
 pgw transcribe ~/Videos/news.mp4 --language fr
 
 # Translate existing subtitles
@@ -65,16 +70,16 @@ pgw play video.mp4 --subs transcription.fr.vtt
 pgw play video.mp4 --bilingual bilingual.fr-en.vtt
 
 # Web player (opens browser, no mpv needed)
-pgw serve pgw_workspace/19h30/20260217_164802/
+pgw serve pgw_workspace/my-video/20260217_164802/
 ```
 
 ### Workspace Output
 
-Each processed video gets a workspace directory:
+Each processed file gets a workspace directory:
 
-```
-pgw_workspace/19h30/20260217_164802/
-├── video.mp4                    # Downloaded/copied video
+```plaintext
+pgw_workspace/my-video/20260217_164802/
+├── video.mp4                    # Symlinked source (copy as fallback)
 ├── audio.wav                    # Extracted audio
 ├── transcription.fr.vtt         # Original language subtitles
 ├── transcription.fr.txt         # Plain text transcript
@@ -119,8 +124,9 @@ Whisper supports **100 languages** for transcription with word-level timestamps 
 
 ## How It Works
 
-```
-Video/URL → Download → Extract Audio → Whisper Transcription (stable-ts)
+```plaintext
+Video/Audio/URL → Download → Extract Audio → Whisper Transcription (stable-ts)
+    → Subtitle Regrouping + spaCy Function Word Fix
     → LLM Cleanup (fix ASR errors) → LLM Translation
     → Save VTT/TXT files + bilingual VTT → Play with dual subtitles in mpv
 ```
@@ -133,6 +139,7 @@ Video/URL → Download → Extract Audio → Whisper Transcription (stable-ts)
 | LLM Integration | [LiteLLM](https://github.com/BerriAI/litellm) (Ollama, OpenAI, Claude, etc.)            |
 | Local LLM       | [Ollama](https://ollama.com/) with Qwen 3 (default)                                     |
 | Video Download  | [yt-dlp](https://github.com/yt-dlp/yt-dlp)                                              |
+| NLP             | [spaCy](https://spacy.io/) (POS tagging for subtitle segmentation, 24 languages)        |
 | Subtitle I/O    | [pysubs2](https://github.com/tkarabela/pysubs2)                                         |
 | Video Playback  | [mpv](https://mpv.io/) (system binary, no Python binding needed)                        |
 | CLI             | [Typer](https://typer.tiangolo.com/) + [Rich](https://github.com/Textualize/rich)       |
@@ -142,13 +149,14 @@ Video/URL → Download → Extract Audio → Whisper Transcription (stable-ts)
 - [x] Project setup
 - [x] stable-ts transcription with word-level timestamps
 - [x] LLM subtitle cleanup and translation
-- [x] yt-dlp video download (RTS/SRF support)
+- [x] yt-dlp video download
 - [x] mpv dual-subtitle playback
 - [x] Full pipeline CLI (`pgw run`)
 - [x] Web-based player alternative (`pgw serve`)
+- [x] spaCy-based subtitle segmentation (dangling function word fix, 24 languages)
 - [ ] Vocabulary extraction for language learners
 - [ ] Anki card generation from subtitle pairs
 
 ## License
 
-MIT
+[MIT](LICENSE)
