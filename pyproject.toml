@@ -26,8 +26,12 @@ llm = [
     "litellm[proxy]>=1.40",
     "ollama>=0.4",
 ]
+nlp = [
+    "spacy>=3.7",
+    "pip",
+]
 all = [
-    "pgw[transcribe,download,llm]",
+    "pgw[transcribe,download,llm,nlp]",
 ]
 dev = [
     "pytest>=8.0",
