@@ -23,24 +23,31 @@ _PROJECT_CONFIG = Path("pgw.toml")
 
 
 class WhisperConfig(BaseModel):
-    model_size: str = "large-v3-turbo"
+    backend: str = "local"  # "local" or "api"
+    local_model: str = "large-v3-turbo"
+    api_model: str = "groq/whisper-large-v3-turbo"
+    api_base: str | None = None  # Custom API endpoint (e.g. self-hosted Whisper)
     language: str = "fr"
     device: str = "auto"
     word_timestamps: bool = True
 
+    @property
+    def model(self) -> str:
+        """Return the model for the active backend."""
+        return self.api_model if self.backend == "api" else self.local_model
+
 
 class LLMConfig(BaseModel):
-    provider: str = "ollama_chat/qwen3:8b"
+    model: str = "ollama_chat/qwen3:8b"
     api_base: str = "http://localhost:11434"
     temperature: float = 0.3
     max_tokens: int = 4096
-    cleanup_enabled: bool = True
+    cleanup_enabled: bool = False
     translation_enabled: bool = True
     target_language: str = "en"
 
 
 class DownloadConfig(BaseModel):
-    output_dir: Path = Path("./downloads")
     format: str = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]"
 
 
@@ -61,6 +68,11 @@ class PGWConfig(BaseSettings):
     download: DownloadConfig = DownloadConfig()
     player: PlayerConfig = PlayerConfig()
     workspace_dir: Path = Path("./pgw_workspace")
+
+    @property
+    def download_dir(self) -> Path:
+        """Download cache directory, under the shared workspace cache."""
+        return self.workspace_dir / ".cache" / "downloads"
 
 
 def _load_toml(path: Path) -> dict:
@@ -87,7 +99,7 @@ def load_config(**cli_overrides: object) -> PGWConfig:
 
     Args:
         **cli_overrides: Direct overrides from CLI flags. Keys can be
-            dot-separated (e.g. whisper.model_size="medium").
+            dot-separated (e.g. whisper.local_model="medium").
     """
     # Layer 1-3: TOML files
     config_data: dict = {}

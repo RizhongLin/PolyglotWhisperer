@@ -17,6 +17,44 @@ from pgw.utils.console import console
 
 CHUNK_SIZE = 20
 OVERLAP = 2  # Context overlap between chunks for coherence
+MAX_RETRIES = 2  # Retry with smaller batch on count mismatch
+
+
+def _process_chunk(
+    texts: list[str],
+    language: str,
+    config: LLMConfig,
+    context_prefix: str,
+) -> list[str]:
+    """Process a single chunk, retrying with smaller batches on count mismatch."""
+    numbered = format_numbered_segments(texts)
+    messages = [
+        {"role": "system", "content": CLEANUP_SYSTEM},
+        {
+            "role": "user",
+            "content": CLEANUP_USER.format(
+                count=len(texts),
+                language=language,
+                numbered_segments=context_prefix + numbered,
+            ),
+        },
+    ]
+
+    response = complete(messages, config)
+    cleaned_texts, exact_match = parse_numbered_response(response, len(texts))
+
+    if exact_match or len(texts) <= 2:
+        return cleaned_texts
+
+    # Count mismatch — retry with smaller batches
+    console.print(
+        f"[yellow]Cleanup count mismatch ({len(texts)} expected), "
+        f"retrying with smaller batches...[/yellow]"
+    )
+    mid = len(texts) // 2
+    first_half = _process_chunk(texts[:mid], language, config, context_prefix)
+    second_half = _process_chunk(texts[mid:], language, config, "")
+    return first_half + second_half
 
 
 def cleanup_subtitles(
@@ -28,6 +66,7 @@ def cleanup_subtitles(
     """Clean up subtitle segments using an LLM.
 
     Processes segments in chunks with overlap for context coherence.
+    Retries with smaller batches on count mismatch.
     Preserves all timestamps — only text is modified.
 
     Args:
@@ -73,25 +112,30 @@ def cleanup_subtitles(
                     + "\n\nNow clean these:\n"
                 )
 
-            numbered = format_numbered_segments(texts)
-            messages = [
-                {"role": "system", "content": CLEANUP_SYSTEM},
-                {
-                    "role": "user",
-                    "content": CLEANUP_USER.format(
-                        count=len(texts),
-                        language=language,
-                        numbered_segments=context_prefix + numbered,
-                    ),
-                },
-            ]
+            # Skip empty segments — don't send to LLM
+            non_empty_idx = [j for j, t in enumerate(texts) if t.strip()]
+            non_empty_texts = [texts[j] for j in non_empty_idx]
 
-            try:
-                response = complete(messages, config)
-                cleaned_texts = parse_numbered_response(response, len(texts))
-            except Exception as e:
-                console.print(f"[yellow]Cleanup failed for chunk, keeping original:[/yellow] {e}")
-                cleaned_texts = texts
+            if non_empty_texts:
+                try:
+                    result_texts = _process_chunk(
+                        non_empty_texts,
+                        language,
+                        config,
+                        context_prefix,
+                    )
+                except Exception as e:
+                    console.print(
+                        f"[yellow]Cleanup failed for chunk, keeping original:[/yellow] {e}"
+                    )
+                    result_texts = non_empty_texts
+            else:
+                result_texts = []
+
+            # Reconstruct full list with empties preserved
+            cleaned_texts = [""] * len(texts)
+            for j, idx in enumerate(non_empty_idx):
+                cleaned_texts[idx] = result_texts[j] if j < len(result_texts) else texts[idx]
 
             for seg, new_text in zip(chunk, cleaned_texts):
                 # Fall back to original if LLM returned empty

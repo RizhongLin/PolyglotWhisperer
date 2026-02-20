@@ -25,9 +25,9 @@ def translate(
         str,
         typer.Option("--from", "-s", help="Source language code (run 'pgw languages' to list)."),
     ] = "fr",
-    provider: Annotated[
+    llm_model: Annotated[
         Optional[str],
-        typer.Option(help="LLM provider string (e.g. ollama_chat/qwen3:8b)."),
+        typer.Option("--llm-model", help="LLM model (e.g. ollama_chat/qwen3:8b)."),
     ] = None,
     output: Annotated[
         Optional[Path],
@@ -58,8 +58,8 @@ def translate(
         raise typer.Exit(1)
 
     overrides = {}
-    if provider is not None:
-        overrides["llm.provider"] = provider
+    if llm_model is not None:
+        overrides["llm.model"] = llm_model
     overrides["llm.target_language"] = to
 
     config = load_config(**overrides)

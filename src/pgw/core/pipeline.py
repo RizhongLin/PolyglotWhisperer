@@ -7,7 +7,8 @@ from pathlib import Path
 
 from pgw.core.config import PGWConfig
 from pgw.downloader.resolver import is_url, resolve
-from pgw.utils.audio import extract_audio
+from pgw.utils.audio import extract_audio_cached
+from pgw.utils.cache import link_or_copy
 from pgw.utils.console import console
 from pgw.utils.paths import create_workspace, save_metadata, workspace_paths
 
@@ -40,7 +41,7 @@ def run_pipeline(
     # Step 1: Resolve input
     if is_url(input_path):
         console.print(f"[bold]Downloading:[/bold] {input_path}")
-        source = resolve(input_path, output_dir=config.download.output_dir)
+        source = resolve(input_path, output_dir=config.download_dir)
     else:
         from pgw.core.models import VideoSource
 
@@ -58,15 +59,9 @@ def run_pipeline(
     # Link video into workspace (symlink to save disk, copy as fallback)
     video_dest = paths["video"]
     if not video_dest.is_file() and not video_dest.is_symlink():
-        import os
-        import shutil
+        link_or_copy(source.video_path, video_dest)
 
-        try:
-            os.symlink(source.video_path.resolve(), video_dest)
-        except OSError:
-            shutil.copy2(source.video_path, video_dest)
-
-    # Step 3: Extract audio
+    # Step 3: Extract audio (with cross-workspace cache)
     audio_path = paths["audio"]
     if not audio_path.is_file():
         clip_msg = ""
@@ -78,12 +73,15 @@ def run_pipeline(
                 parts.append(f"duration {duration}")
             clip_msg = f" ({', '.join(parts)})"
         console.print(f"[bold]Extracting audio{clip_msg}...[/bold]")
-        extract_audio(
+        _, cache_hit = extract_audio_cached(
             source.video_path,
             output_path=audio_path,
+            workspace_dir=config.workspace_dir,
             start=start,
             duration=duration,
         )
+        if cache_hit:
+            console.print("[dim]Audio found in cache.[/dim]")
     else:
         console.print("[dim]Audio already extracted, skipping.[/dim]")
 
@@ -93,9 +91,16 @@ def run_pipeline(
     json_path = workspace / "transcription.json"
     needs_llm = (cleanup and config.llm.cleanup_enabled) or translate
     llm_was_used = False
+    use_api = config.whisper.backend == "api"
 
     if not vtt_path.is_file():
-        if json_path.is_file() and needs_llm:
+        if use_api:
+            # API transcription — returns segments directly, no WhisperResult
+            from pgw.transcriber.api import transcribe as api_transcribe
+
+            segments = api_transcribe(audio_path, config.whisper)
+
+        elif json_path.is_file() and needs_llm:
             # Resume: transcription JSON cached from interrupted run
             console.print("[dim]Transcription JSON found, loading segments...[/dim]")
             import stable_whisper
@@ -129,14 +134,12 @@ def run_pipeline(
             del result
             gc.collect()
 
-        # LLM processing for fresh segments (cleanup + save)
-        if needs_llm:
+        # Post-processing and save for segment-based paths (API or LLM)
+        if use_api or needs_llm:
             from pgw.subtitles.converter import save_subtitles
+            from pgw.transcriber.postprocess import fix_dangling_clitics
 
-            if language == "fr":
-                from pgw.subtitles.converter import fix_trailing_clitics
-
-                segments = fix_trailing_clitics(segments)
+            segments = fix_dangling_clitics(segments, language)
 
             if cleanup and config.llm.cleanup_enabled:
                 from pgw.llm.cleanup import cleanup_subtitles
@@ -153,12 +156,10 @@ def run_pipeline(
         console.print("[dim]Transcription found, skipping.[/dim]")
         if needs_llm:
             from pgw.subtitles.converter import load_subtitles
+            from pgw.transcriber.postprocess import fix_dangling_clitics
 
             segments = load_subtitles(vtt_path)
-            if language == "fr":
-                from pgw.subtitles.converter import fix_trailing_clitics
-
-                segments = fix_trailing_clitics(segments)
+            segments = fix_dangling_clitics(segments, language)
 
     # Step 5: Optional translation
     if translate:
@@ -189,7 +190,7 @@ def run_pipeline(
     if llm_was_used:
         from pgw.llm.client import unload_ollama_model
 
-        unload_ollama_model(config.llm.provider)
+        unload_ollama_model(config.llm.model)
 
     # Step 6: Save metadata
     save_metadata(
@@ -199,9 +200,9 @@ def run_pipeline(
         language=language,
         target_language=translate,
         cleanup=cleanup,
-        whisper_model=config.whisper.model_size,
+        whisper_model=config.whisper.model,
         whisper_device=config.whisper.device,
-        llm_provider=config.llm.provider,
+        llm_model=config.llm.model,
         start=start,
         duration=duration,
         source_duration=source.duration,

@@ -1,20 +1,21 @@
 [whisper]
-model_size = "large-v3-turbo"
+backend = "local"
+local_model = "large-v3-turbo"
+api_model = "groq/whisper-large-v3-turbo"
 language = "fr"
 device = "auto"
 word_timestamps = true
 
 [llm]
-provider = "ollama_chat/qwen3:8b"
+model = "ollama_chat/qwen3:8b"
 api_base = "http://localhost:11434"
 temperature = 0.3
 max_tokens = 4096
-cleanup_enabled = true
+cleanup_enabled = false
 translation_enabled = true
 target_language = "en"
 
 [download]
-output_dir = "./downloads"
 format = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]"
 
 [player]

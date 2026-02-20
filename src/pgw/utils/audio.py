@@ -6,6 +6,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from pgw.utils.cache import cache_key, get_cache_dir, link_or_copy
+
 
 def check_ffmpeg() -> bool:
     """Check if ffmpeg is available on the system."""
@@ -87,3 +89,47 @@ def extract_audio(
         stderr_msg = result.stderr.decode(errors="replace").strip()
         raise subprocess.CalledProcessError(result.returncode, cmd, stderr=stderr_msg)
     return output_path
+
+
+def extract_audio_cached(
+    video_path: Path,
+    output_path: Path,
+    workspace_dir: Path,
+    sample_rate: int = 16000,
+    start: str | None = None,
+    duration: str | None = None,
+) -> tuple[Path, bool]:
+    """Extract audio with caching. Returns (path, cache_hit).
+
+    Cache lives at <workspace_dir>/.cache/audio/. On hit, symlinks the
+    cached file into the workspace. On miss, extracts to cache then symlinks.
+
+    Args:
+        video_path: Path to the input video file.
+        output_path: Desired output path in workspace.
+        workspace_dir: Base workspace directory for the cache.
+        sample_rate: Audio sample rate in Hz.
+        start: Start time for clipping (ffmpeg format).
+        duration: Duration to extract (ffmpeg format).
+
+    Returns:
+        Tuple of (audio_path, cache_hit).
+    """
+    cache_dir = get_cache_dir(workspace_dir, "audio")
+    key = cache_key(video_path, sample_rate=sample_rate, start=start, duration=duration)
+    cached_path = cache_dir / f"{key}.wav"
+
+    if cached_path.is_file():
+        link_or_copy(cached_path, output_path)
+        return output_path, True
+
+    # Cache miss — extract to cache, then symlink
+    extract_audio(
+        video_path,
+        output_path=cached_path,
+        sample_rate=sample_rate,
+        start=start,
+        duration=duration,
+    )
+    link_or_copy(cached_path, output_path)
+    return output_path, False

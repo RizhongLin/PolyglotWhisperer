@@ -5,16 +5,26 @@ from pgw.core.config import _deep_merge, load_config
 
 def test_cli_overrides():
     """CLI overrides take precedence over defaults."""
-    config = load_config(**{"whisper.model_size": "medium", "whisper.language": "de"})
-    assert config.whisper.model_size == "medium"
+    config = load_config(**{"whisper.local_model": "medium", "whisper.language": "de"})
+    assert config.whisper.local_model == "medium"
+    assert config.whisper.model == "medium"  # property returns local_model
     assert config.whisper.language == "de"
 
 
 def test_cli_override_none_ignored():
     """None values in CLI overrides are ignored, defaults preserved."""
     default = load_config()
-    overridden = load_config(**{"whisper.model_size": None})
-    assert overridden.whisper.model_size == default.whisper.model_size
+    overridden = load_config(**{"whisper.local_model": None})
+    assert overridden.whisper.local_model == default.whisper.local_model
+
+
+def test_model_property_selects_backend():
+    """model property returns api_model when backend is api."""
+    local = load_config(**{"whisper.backend": "local"})
+    assert local.whisper.model == local.whisper.local_model
+
+    api = load_config(**{"whisper.backend": "api"})
+    assert api.whisper.model == api.whisper.api_model
 
 
 def test_deep_merge():

@@ -23,9 +23,9 @@ def transcribe(
         typer.Option("--language", "-l", help="Source language code (see 'pgw languages')."),
     ] = "fr",
     model: Annotated[
-        str,
-        typer.Option("--model", "-m", help="Whisper model size."),
-    ] = "large-v3-turbo",
+        Optional[str],
+        typer.Option("--model", "-m", help="Model for the active backend."),
+    ] = None,
     device: Annotated[
         str,
         typer.Option(help="Compute device: cpu, cuda, mps, or auto."),
@@ -54,14 +54,17 @@ def transcribe(
         bool,
         typer.Option("--cleanup/--no-cleanup", help="Clean up transcription with LLM."),
     ] = False,
-    provider: Annotated[
+    llm_model: Annotated[
         Optional[str],
-        typer.Option(help="LLM provider for cleanup (e.g. ollama_chat/qwen3:8b)."),
+        typer.Option("--llm-model", help="LLM model for cleanup (e.g. ollama_chat/qwen3:8b)."),
+    ] = None,
+    backend: Annotated[
+        Optional[str],
+        typer.Option(help="Transcription backend: local or api."),
     ] = None,
 ) -> None:
     """Transcribe a video or audio file (or URL) to subtitles with word-level timestamps."""
     from pgw.core.languages import validate_language
-    from pgw.transcriber.stable_ts import transcribe as do_transcribe
 
     try:
         validate_language(language)
@@ -70,18 +73,22 @@ def transcribe(
         raise typer.Exit(1)
 
     overrides: dict[str, object] = {
-        "whisper.model_size": model,
         "whisper.language": language,
         "whisper.device": device,
     }
-    if provider is not None:
-        overrides["llm.provider"] = provider
+    if model is not None:
+        model_key = "whisper.api_model" if backend == "api" else "whisper.local_model"
+        overrides[model_key] = model
+    if llm_model is not None:
+        overrides["llm.model"] = llm_model
+    if backend is not None:
+        overrides["whisper.backend"] = backend
     config = load_config(**overrides)
 
     # Resolve input: URL → download, local path → use directly
     if is_url(input_path):
         console.print(f"[bold]Downloading:[/bold] {input_path}")
-        source = resolve(input_path, output_dir=config.download.output_dir)
+        source = resolve(input_path, output_dir=config.download_dir)
         video_path = source.video_path
     else:
         video_path = Path(input_path)
@@ -97,36 +104,53 @@ def transcribe(
         console.print("[bold]Extracting audio...[/bold]")
         audio_path = extract_audio(video_path, start=start, duration=duration)
 
-    # Transcribe — returns raw stable-ts WhisperResult
-    result = do_transcribe(audio_path, config.whisper)
-
     # Determine output path
     if output is not None:
         sub_path = output
     else:
         sub_path = video_path.with_suffix(f".{language}.{fmt}")
 
-    if cleanup:
-        # LLM cleanup path: convert to segments, clean, save via pysubs2
-        from pgw.llm.cleanup import cleanup_subtitles
-        from pgw.subtitles.converter import result_to_segments, save_subtitles
+    use_api = config.whisper.backend == "api"
 
-        segments = result_to_segments(result)
-        if language == "fr":
-            from pgw.subtitles.converter import fix_trailing_clitics
+    if use_api:
+        # API transcription — returns segments directly
+        from pgw.subtitles.converter import save_subtitles
+        from pgw.transcriber.api import transcribe as api_transcribe
+        from pgw.transcriber.postprocess import fix_dangling_clitics
 
-            segments = fix_trailing_clitics(segments)
-        console.print("[bold]Cleaning up with LLM...[/bold]")
-        segments = cleanup_subtitles(segments, language, config.llm)
+        segments = api_transcribe(audio_path, config.whisper)
+        segments = fix_dangling_clitics(segments, language)
+
+        if cleanup:
+            from pgw.llm.cleanup import cleanup_subtitles
+
+            console.print("[bold]Cleaning up with LLM...[/bold]")
+            segments = cleanup_subtitles(segments, language, config.llm)
+
         save_subtitles(segments, sub_path, fmt=fmt)
     else:
-        # Direct export via stable-ts built-in methods
-        if fmt in ("srt", "vtt"):
-            result.to_srt_vtt(str(sub_path), vtt=(fmt == "vtt"))
-        elif fmt == "ass":
-            result.to_ass(str(sub_path))
+        # Local transcription — returns raw stable-ts WhisperResult
+        from pgw.transcriber.stable_ts import transcribe as do_transcribe
+
+        result = do_transcribe(audio_path, config.whisper)
+
+        if cleanup:
+            from pgw.llm.cleanup import cleanup_subtitles
+            from pgw.subtitles.converter import result_to_segments, save_subtitles
+            from pgw.transcriber.postprocess import fix_dangling_clitics
+
+            segments = result_to_segments(result)
+            segments = fix_dangling_clitics(segments, language)
+            console.print("[bold]Cleaning up with LLM...[/bold]")
+            segments = cleanup_subtitles(segments, language, config.llm)
+            save_subtitles(segments, sub_path, fmt=fmt)
         else:
-            result.to_srt_vtt(str(sub_path), vtt=True)
+            if fmt in ("srt", "vtt"):
+                result.to_srt_vtt(str(sub_path), vtt=(fmt == "vtt"))
+            elif fmt == "ass":
+                result.to_ass(str(sub_path))
+            else:
+                result.to_srt_vtt(str(sub_path), vtt=True)
 
     console.print(f"[green]Saved:[/green] {sub_path}")
 
@@ -134,7 +158,9 @@ def transcribe(
     if not no_txt:
         txt_path = sub_path.with_suffix(".txt")
         if txt_path != sub_path:
-            if cleanup:
+            if use_api or cleanup:
+                from pgw.subtitles.converter import save_subtitles
+
                 save_subtitles(segments, txt_path, fmt="txt")
             else:
                 result.to_txt(str(txt_path))

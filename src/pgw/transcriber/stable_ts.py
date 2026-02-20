@@ -76,11 +76,11 @@ def _load_model(config: WhisperConfig):
     device = _resolve_device(config.device, backend)
 
     if backend == "mlx":
-        console.print(f"[bold]Loading model:[/bold] {config.model_size} (MLX, Apple Silicon)")
-        return stable_whisper.load_mlx_whisper(config.model_size)
+        console.print(f"[bold]Loading model:[/bold] {config.model} (MLX, Apple Silicon)")
+        return stable_whisper.load_mlx_whisper(config.model)
 
-    console.print(f"[bold]Loading model:[/bold] {config.model_size} on {device}")
-    return stable_whisper.load_model(config.model_size, device=device)
+    console.print(f"[bold]Loading model:[/bold] {config.model} on {device}")
+    return stable_whisper.load_model(config.model, device=device)
 
 
 def transcribe(audio_path: Path, config: WhisperConfig):

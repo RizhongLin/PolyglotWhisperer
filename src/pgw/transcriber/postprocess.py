@@ -7,12 +7,18 @@ dangling function words at segment boundaries.
 
 from __future__ import annotations
 
+import copy
+
+from pgw.core.models import SubtitleSegment
 from pgw.utils.console import console
 
 # POS tags that should not dangle at the end of a subtitle segment.
 # DET = determiners (le/la/les/the/der/die/das/el/la/los...)
 # ADP = adpositions/prepositions (de/en/à/of/in/to/von/mit...)
 _DANGLING_POS = {"DET", "ADP"}
+
+# Apostrophe characters used in Romance language clitics (l', d', qu', etc.)
+_APOSTROPHES = {"'", "\u2019"}
 
 # Mapping from pgw language codes to spaCy model names.
 # Languages without a model here gracefully skip the function-word fix.
@@ -97,7 +103,12 @@ def regroup_for_subtitles(result, max_chars: int = 50) -> None:
     result.split_by_gap(0.5)
     result.split_by_punctuation([(",", " "), ";", "，", "；"], min_words=4)
     result.split_by_length(max_chars=max_chars)
-    result.split_by_duration(max_dur=8.0)
+    try:
+        result.split_by_duration(max_dur=8.0)
+    except ValueError:
+        console.print(
+            "[yellow]Warning: split_by_duration skipped (1-word segment edge case).[/yellow]"
+        )
     result.merge_by_gap(0.15, max_words=3, max_chars=max_chars, is_sum_max=True)
     result.clamp_max()
 
@@ -118,6 +129,16 @@ def fix_dangling_function_words(result, language: str) -> None:
         words = segments[i].words
         if len(words) <= 1:
             continue  # Don't empty a segment
+
+        # Check if the last Whisper word ends with an apostrophe (clitic)
+        last_word_text = words[-1].word.strip()
+        if last_word_text and last_word_text[-1] in _APOSTROPHES:
+            word = words.pop()
+            segments[i].reassign_ids()
+            segments[i + 1].words.insert(0, word)
+            word.segment = segments[i + 1]
+            segments[i + 1].reassign_ids()
+            continue
 
         # Run POS tagger on full segment text for context-aware tagging
         segment_text = segments[i].text.strip()
@@ -143,3 +164,56 @@ def fix_dangling_function_words(result, language: str) -> None:
 
     # Drop segments that became empty (all words moved out)
     result.segments = [s for s in result.segments if s.words]
+
+
+def fix_dangling_clitics(segments: list[SubtitleSegment], language: str) -> list[SubtitleSegment]:
+    """Move dangling clitics/function words from segment ends to the next segment.
+
+    Text-level version of fix_dangling_function_words — operates on
+    SubtitleSegment text (no WhisperResult/word objects needed). Suitable
+    for the API transcription path.
+
+    Detects two patterns:
+    1. Text ending with an apostrophe (Romance clitics: l', d', qu', etc.)
+       — uses simple text check, handles spaCy splitting "l'" into ["l", "'"]
+    2. Trailing DET/ADP POS tags — uses spaCy
+    """
+    nlp = _load_spacy_model(language)
+    if nlp is None:
+        return segments
+
+    fixed = [copy.copy(seg) for seg in segments]
+
+    for i in range(len(fixed) - 1):
+        text = fixed[i].text.strip()
+        if not text:
+            continue
+
+        # Pattern 1: text ends with apostrophe (clitic like l', d', qu')
+        # Move the trailing "word'" to the next segment via text splitting
+        if text[-1] in _APOSTROPHES:
+            space_idx = text.rfind(" ")
+            if space_idx >= 0:
+                dangling = text[space_idx + 1 :]
+                fixed[i].text = text[:space_idx].rstrip()
+                fixed[i + 1].text = dangling + fixed[i + 1].text.lstrip()
+            else:
+                # Entire segment is a clitic (e.g. "l'")
+                fixed[i].text = ""
+                fixed[i + 1].text = text + fixed[i + 1].text.lstrip()
+            continue
+
+        # Pattern 2: trailing DET/ADP via spaCy POS tagging
+        doc = nlp(text)
+        if not doc or len(doc) <= 1:
+            continue
+
+        last_token = doc[-1]
+        if last_token.pos_ not in _DANGLING_POS:
+            continue
+
+        # Move the dangling token text to the next segment
+        fixed[i].text = text[: last_token.idx].rstrip()
+        fixed[i + 1].text = last_token.text.strip() + " " + fixed[i + 1].text.lstrip()
+
+    return [seg for seg in fixed if seg.text.strip()]

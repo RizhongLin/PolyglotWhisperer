@@ -114,7 +114,7 @@ def download(
         raise ImportError("yt-dlp is not installed. Install with: uv sync --extra download")
 
     if output_dir is None:
-        output_dir = Path("./downloads")
+        output_dir = Path("./pgw_workspace/.cache/downloads")
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 

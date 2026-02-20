@@ -1,6 +1,7 @@
 """PolyglotWhisperer CLI entry point."""
 
 import typer
+from dotenv import load_dotenv
 
 from pgw.cli.languages import languages
 from pgw.cli.play import play
@@ -19,6 +20,9 @@ app = typer.Typer(
 @app.callback()
 def main() -> None:
     """PolyglotWhisperer — Video transcription & translation for language learners."""
+    # Load .env file for API keys (GROQ_API_KEY, OPENAI_API_KEY, etc.)
+    # Does not override existing env vars — shell exports take precedence
+    load_dotenv(override=False)
 
 
 app.command("run")(run)

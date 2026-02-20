@@ -23,9 +23,9 @@ def run(
         typer.Option("--translate", "-t", help="Target language for translation."),
     ] = None,
     model: Annotated[
-        str,
-        typer.Option("--model", "-m", help="Whisper model size."),
-    ] = "large-v3-turbo",
+        Optional[str],
+        typer.Option("--model", "-m", help="Model for the active backend."),
+    ] = None,
     device: Annotated[
         str,
         typer.Option(help="Compute device: cpu, cuda, mps, or auto."),
@@ -46,9 +46,13 @@ def run(
         bool,
         typer.Option("--no-play", help="Skip video playback after processing."),
     ] = False,
-    provider: Annotated[
+    llm_model: Annotated[
         Optional[str],
-        typer.Option(help="LLM provider (e.g. ollama_chat/qwen3:8b)."),
+        typer.Option("--llm-model", help="LLM model (e.g. ollama_chat/qwen3:8b)."),
+    ] = None,
+    backend: Annotated[
+        Optional[str],
+        typer.Option(help="Transcription backend: local or api."),
     ] = None,
 ) -> None:
     """Run the full pipeline: download, transcribe, translate, and play."""
@@ -70,12 +74,16 @@ def run(
             raise typer.Exit(1)
 
     overrides: dict[str, object] = {
-        "whisper.model_size": model,
         "whisper.language": language,
         "whisper.device": device,
     }
-    if provider is not None:
-        overrides["llm.provider"] = provider
+    if model is not None:
+        model_key = "whisper.api_model" if backend == "api" else "whisper.local_model"
+        overrides[model_key] = model
+    if llm_model is not None:
+        overrides["llm.model"] = llm_model
+    if backend is not None:
+        overrides["whisper.backend"] = backend
     if translate is not None:
         overrides["llm.target_language"] = translate
 

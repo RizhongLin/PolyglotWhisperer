@@ -6,25 +6,25 @@ from pgw.core.config import LLMConfig
 from pgw.utils.console import console
 
 
-def _extract_ollama_model(provider: str) -> str | None:
-    """Extract the Ollama model name from a LiteLLM provider string.
+def _extract_ollama_model(model_id: str) -> str | None:
+    """Extract the Ollama model name from a LiteLLM model string.
 
-    Returns None if the provider is not an Ollama model.
+    Returns None if the model is not an Ollama model.
     E.g. "ollama_chat/qwen3:8b" -> "qwen3:8b"
     """
     for prefix in ("ollama_chat/", "ollama/"):
-        if provider.startswith(prefix):
-            return provider[len(prefix) :]
+        if model_id.startswith(prefix):
+            return model_id[len(prefix) :]
     return None
 
 
-def ensure_ollama_model(provider: str) -> None:
+def ensure_ollama_model(model_id: str) -> None:
     """Pull the Ollama model if not already available locally.
 
-    No-op if the provider is not an Ollama model or if ollama package
+    No-op if the model is not an Ollama model or if ollama package
     is not installed.
     """
-    model_name = _extract_ollama_model(provider)
+    model_name = _extract_ollama_model(model_id)
     if model_name is None:
         return
 
@@ -76,17 +76,17 @@ def complete(
     except ImportError:
         raise ImportError("LiteLLM is not installed. Install with: uv sync --extra llm")
 
-    ensure_ollama_model(config.provider)
+    ensure_ollama_model(config.model)
 
-    # Only pass api_base for Ollama providers — other providers use their own endpoints
+    # Only pass api_base for Ollama models — other providers use their own endpoints
     call_kwargs: dict = {
-        "model": config.provider,
+        "model": config.model,
         "messages": messages,
         "temperature": config.temperature,
         "max_tokens": config.max_tokens,
         **kwargs,
     }
-    if _extract_ollama_model(config.provider) is not None and config.api_base:
+    if _extract_ollama_model(config.model) is not None and config.api_base:
         call_kwargs["api_base"] = config.api_base
 
     response = completion(**call_kwargs)
@@ -99,14 +99,14 @@ def complete(
     return content
 
 
-def unload_ollama_model(provider: str) -> None:
+def unload_ollama_model(model_id: str) -> None:
     """Unload an Ollama model from GPU memory immediately.
 
     Sends a generate request with keep_alive=0, which tells Ollama
     to unload the model right away instead of keeping it for 5 minutes.
-    No-op if the provider is not an Ollama model.
+    No-op if the model is not an Ollama model.
     """
-    model_name = _extract_ollama_model(provider)
+    model_name = _extract_ollama_model(model_id)
     if model_name is None:
         return
 
