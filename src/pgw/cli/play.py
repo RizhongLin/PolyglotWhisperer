@@ -9,6 +9,7 @@ import typer
 
 from pgw.core.config import load_config
 from pgw.utils.console import console
+from pgw.utils.paths import find_video
 
 
 def play(
@@ -37,9 +38,9 @@ def play(
     # If a directory is passed, auto-detect workspace files
     if video.is_dir():
         workspace = video
-        video_path = workspace / "video.mp4"
-        if not video_path.is_file():
-            console.print(f"[red]No video.mp4 found in workspace:[/red] {workspace}")
+        video_path = find_video(workspace)
+        if video_path is None:
+            console.print(f"[red]No video file found in workspace:[/red] {workspace}")
             raise typer.Exit(1)
 
         # Auto-detect bilingual VTT

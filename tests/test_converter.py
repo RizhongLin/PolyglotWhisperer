@@ -6,6 +6,7 @@ import pytest
 
 from pgw.core.models import SubtitleSegment
 from pgw.subtitles.converter import (
+    _format_vtt_time,
     load_subtitles,
     result_to_segments,
     save_bilingual_vtt,
@@ -129,6 +130,42 @@ def test_load_result_from_json(tmp_path: Path):
     assert segments[0].start == 0.0
     assert segments[0].end == 2.5
     assert segments[1].text == "Comment allez-vous"
+
+
+# --- Tests for _format_vtt_time edge cases ---
+
+
+@pytest.mark.parametrize(
+    "seconds, expected",
+    [
+        (0.0, "00:00:00.000"),
+        (-1.0, "00:00:00.000"),
+        (-99999.0, "00:00:00.000"),
+        (1.0, "00:00:01.000"),
+        (1.234, "00:00:01.234"),
+        (1.9999, "00:00:01.999"),
+        (0.123, "00:00:00.123"),
+        (65.5, "00:01:05.500"),
+        (125.75, "00:02:05.750"),
+        (3600.0, "01:00:00.000"),
+        (36000.0, "10:00:00.000"),
+    ],
+    ids=[
+        "zero",
+        "negative-clamped",
+        "large-negative-clamped",
+        "one-second",
+        "millisecond-precision",
+        "sub-ms-truncated",
+        "fractional",
+        "minutes-seconds",
+        "mixed",
+        "one-hour",
+        "ten-hours",
+    ],
+)
+def test_format_vtt_time(seconds, expected):
+    assert _format_vtt_time(seconds) == expected
 
 
 # --- Tests for fix_dangling_clitics (spaCy-based, in postprocess) ---

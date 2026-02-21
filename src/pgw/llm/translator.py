@@ -30,8 +30,12 @@ def _process_chunk(
     config: LLMConfig,
     system_prompt: str,
     context_prefix: str,
+    _depth: int = 0,
 ) -> list[str]:
     """Process a single translation chunk, retrying with smaller batches on mismatch."""
+    if _depth >= 3:
+        return texts  # Best-effort: return originals to avoid infinite recursion
+
     numbered = format_numbered_segments(texts)
 
     messages = [
@@ -60,9 +64,23 @@ def _process_chunk(
     )
     mid = len(texts) // 2
     first_half = _process_chunk(
-        texts[:mid], source_lang, target_lang, config, system_prompt, context_prefix
+        texts[:mid],
+        source_lang,
+        target_lang,
+        config,
+        system_prompt,
+        context_prefix,
+        _depth=_depth + 1,
     )
-    second_half = _process_chunk(texts[mid:], source_lang, target_lang, config, system_prompt, "")
+    second_half = _process_chunk(
+        texts[mid:],
+        source_lang,
+        target_lang,
+        config,
+        system_prompt,
+        "",
+        _depth=_depth + 1,
+    )
     return first_half + second_half
 
 

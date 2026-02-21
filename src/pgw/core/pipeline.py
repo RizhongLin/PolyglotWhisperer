@@ -52,7 +52,7 @@ def run_pipeline(
     emit("download", 0.0, f"Resolving input: {input_path}")
     if is_url(input_path):
         console.print(f"[bold]Downloading:[/bold] {input_path}")
-        source = resolve(input_path, output_dir=config.download_dir)
+        source = resolve(input_path, output_dir=config.download_dir, fmt=config.download.format)
     else:
         from pgw.core.models import VideoSource
 
@@ -64,8 +64,9 @@ def run_pipeline(
 
     # Step 2: Create workspace
     title = source.title or source.video_path.stem
+    video_ext = source.video_path.suffix or ".mp4"
     workspace = create_workspace(title, base_dir=config.workspace_dir)
-    paths = workspace_paths(workspace, language, target_lang=translate)
+    paths = workspace_paths(workspace, language, target_lang=translate, video_ext=video_ext)
     console.print(f"[bold]Workspace:[/bold] {workspace}")
 
     # Link video into workspace (symlink to save disk, copy as fallback)
@@ -241,6 +242,24 @@ def run_pipeline(
                 pass
             except Exception as e:
                 console.print(f"[yellow]PDF export skipped:[/yellow] {e}")
+
+            try:
+                from pgw.subtitles.export import export_parallel_epub
+
+                epub_path = workspace / f"parallel.{language}-{translate}.epub"
+                export_parallel_epub(
+                    segments,
+                    trans_result.translated,
+                    epub_path,
+                    language,
+                    translate,
+                    title=title,
+                )
+                console.print(f"[green]Saved:[/green] {epub_path}")
+            except ImportError:
+                pass
+            except Exception as e:
+                console.print(f"[yellow]EPUB export skipped:[/yellow] {e}")
         else:
             console.print("[dim]Translation found, skipping.[/dim]")
 

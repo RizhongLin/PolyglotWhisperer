@@ -1,0 +1,28 @@
+[whisper]
+backend = "local"
+local_model = "large-v3-turbo"
+api_model = "groq/whisper-large-v3-turbo"
+language = "fr"
+device = "auto"
+word_timestamps = true
+
+[llm]
+model = "ollama_chat/qwen3:8b"
+api_base = "http://localhost:11434"
+temperature = 0.3
+max_tokens = 4096
+timeout = 120
+num_retries = 2
+cleanup_enabled = false
+translation_enabled = true
+target_language = "en"
+
+[download]
+format = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]"
+
+[player]
+backend = "mpv"
+sub_font_size = 40
+
+[general]
+workspace_dir = "./pgw_workspace"

@@ -170,7 +170,7 @@ def _transcribe_single(
     # Resolve input: URL → download, local path → use directly
     if is_url(input_path):
         console.print(f"[bold]Downloading:[/bold] {input_path}")
-        source = resolve(input_path, output_dir=config.download_dir)
+        source = resolve(input_path, output_dir=config.download_dir, fmt=config.download.format)
         video_path = source.video_path
     else:
         video_path = Path(input_path)

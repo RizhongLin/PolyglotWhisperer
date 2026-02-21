@@ -11,13 +11,13 @@ Layered config loading (lowest to highest priority):
 from __future__ import annotations
 
 import tomllib
+from importlib.resources import files
 from pathlib import Path
 
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-_PACKAGE_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-_DEFAULT_CONFIG = _PACKAGE_ROOT / "config" / "default.toml"
+_DEFAULT_CONFIG_TEXT = (files("pgw.config") / "default.toml").read_text()
 _USER_CONFIG = Path.home() / ".config" / "pgw" / "config.toml"
 _PROJECT_CONFIG = Path("pgw.toml")
 
@@ -42,6 +42,8 @@ class LLMConfig(BaseModel):
     api_base: str = "http://localhost:11434"
     temperature: float = 0.3
     max_tokens: int = 4096
+    timeout: int = 120
+    num_retries: int = 2
     cleanup_enabled: bool = False
     translation_enabled: bool = True
     target_language: str = "en"
@@ -54,7 +56,6 @@ class DownloadConfig(BaseModel):
 class PlayerConfig(BaseModel):
     backend: str = "mpv"
     sub_font_size: int = 40
-    secondary_sub_font_size: int = 32
 
 
 class PGWConfig(BaseSettings):
@@ -101,9 +102,9 @@ def load_config(**cli_overrides: object) -> PGWConfig:
         **cli_overrides: Direct overrides from CLI flags. Keys can be
             dot-separated (e.g. whisper.local_model="medium").
     """
-    # Layer 1-3: TOML files
-    config_data: dict = {}
-    for path in (_DEFAULT_CONFIG, _USER_CONFIG, _PROJECT_CONFIG):
+    # Layer 1-3: TOML files (defaults from packaged TOML, then user/project)
+    config_data: dict = tomllib.loads(_DEFAULT_CONFIG_TEXT)
+    for path in (_USER_CONFIG, _PROJECT_CONFIG):
         layer = _load_toml(path)
         config_data = _deep_merge(config_data, layer)
 

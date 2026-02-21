@@ -14,7 +14,7 @@ def is_url(input_path: str) -> bool:
     return parsed.scheme in ("http", "https")
 
 
-def resolve(input_path: str, output_dir: Path | None = None) -> VideoSource:
+def resolve(input_path: str, output_dir: Path | None = None, fmt: str | None = None) -> VideoSource:
     """Resolve input to a VideoSource.
 
     If input is a local file, return it directly.
@@ -23,6 +23,7 @@ def resolve(input_path: str, output_dir: Path | None = None) -> VideoSource:
     Args:
         input_path: URL or local file path.
         output_dir: Directory for downloaded files.
+        fmt: yt-dlp format string override.
 
     Returns:
         VideoSource with local video path.
@@ -30,7 +31,10 @@ def resolve(input_path: str, output_dir: Path | None = None) -> VideoSource:
     if is_url(input_path):
         from pgw.downloader.ytdlp import download
 
-        return download(input_path, output_dir=output_dir)
+        kwargs: dict = {"output_dir": output_dir}
+        if fmt:
+            kwargs["fmt"] = fmt
+        return download(input_path, **kwargs)
 
     path = Path(input_path)
     if not path.is_file():

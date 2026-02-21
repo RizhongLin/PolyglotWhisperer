@@ -13,6 +13,7 @@ from typing import Annotated, Optional
 import typer
 
 from pgw.utils.console import console
+from pgw.utils.paths import find_video
 
 PLAYER_HTML = """\
 <!DOCTYPE html>
@@ -47,7 +48,7 @@ PLAYER_HTML = """\
 <div class="container">
   <h1>{title}</h1>
   <video id="player" controls autoplay>
-    <source src="/video.mp4" type="video/mp4">
+    <source src="/{video_filename}" type="{video_mime}">
     {tracks}
   </video>
   <div class="controls" id="track-controls"></div>
@@ -106,7 +107,18 @@ def _discover_tracks(workspace: Path) -> list[dict[str, str]]:
     return tracks
 
 
-def _build_html(workspace: Path) -> str:
+_MIME_MAP = {
+    ".mp4": "video/mp4",
+    ".mkv": "video/x-matroska",
+    ".webm": "video/webm",
+    ".avi": "video/x-msvideo",
+    ".mov": "video/quicktime",
+    ".ts": "video/mp2t",
+    ".flv": "video/x-flv",
+}
+
+
+def _build_html(workspace: Path, video_path: Path) -> str:
     """Generate the player HTML for a workspace."""
     tracks = _discover_tracks(workspace)
     title = workspace.parent.name  # slug directory name
@@ -120,7 +132,15 @@ def _build_html(workspace: Path) -> str:
         )
         track_tags.append(tag)
 
-    return PLAYER_HTML.format(title=title, tracks="\n    ".join(track_tags))
+    video_filename = video_path.name
+    video_mime = _MIME_MAP.get(video_path.suffix.lower(), "video/mp4")
+
+    return PLAYER_HTML.format(
+        title=title,
+        tracks="\n    ".join(track_tags),
+        video_filename=video_filename,
+        video_mime=video_mime,
+    )
 
 
 def serve(
@@ -148,12 +168,12 @@ def serve(
         console.print(f"[red]Not a directory:[/red] {workspace}")
         raise typer.Exit(1)
 
-    video_path = workspace / "video.mp4"
-    if not video_path.is_file():
-        console.print(f"[red]No video.mp4 found in:[/red] {workspace}")
+    video_path = find_video(workspace)
+    if video_path is None:
+        console.print(f"[red]No video file found in:[/red] {workspace}")
         raise typer.Exit(1)
 
-    player_html = _build_html(workspace)
+    player_html = _build_html(workspace, video_path)
 
     handler_class = functools.partial(
         _WorkspaceHandler, workspace=workspace, player_html=player_html
@@ -226,7 +246,7 @@ class _WorkspaceHandler(http.server.BaseHTTPRequestHandler):
 
         # Support Range requests for video seeking
         range_header = self.headers.get("Range")
-        if range_header and file_path.suffix == ".mp4":
+        if range_header and file_path.suffix.lower() in _MIME_MAP:
             self._serve_range(file_path, file_size, content_type, range_header)
         else:
             self.send_response(200)

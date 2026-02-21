@@ -84,6 +84,8 @@ def complete(
         "messages": messages,
         "temperature": config.temperature,
         "max_tokens": config.max_tokens,
+        "timeout": config.timeout,
+        "num_retries": config.num_retries,
         **kwargs,
     }
     if _extract_ollama_model(config.model) is not None and config.api_base:

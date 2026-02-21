@@ -9,12 +9,15 @@ save_as_json) directly. This module handles:
 
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 
 import pysubs2
 
 from pgw.core.models import SubtitleSegment
+
+logger = logging.getLogger(__name__)
 
 # VTT inline timestamp cues: <00:00:13.120>
 _VTT_CUE_RE = re.compile(r"<\d{2}:\d{2}[:\.][\d.]+>")
@@ -78,8 +81,15 @@ def save_bilingual_vtt(
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
+    if len(original) != len(translated):
+        logger.warning(
+            "Bilingual VTT: segment count mismatch (original=%d, translated=%d), truncating",
+            len(original),
+            len(translated),
+        )
+    count = min(len(original), len(translated))
     lines = ["WEBVTT", ""]
-    for i, (orig, trans) in enumerate(zip(original, translated, strict=True), 1):
+    for i, (orig, trans) in enumerate(zip(original[:count], translated[:count]), 1):
         start = _format_vtt_time(orig.start)
         end = _format_vtt_time(orig.end)
 
@@ -101,6 +111,7 @@ def save_bilingual_vtt(
 
 def _format_vtt_time(seconds: float) -> str:
     """Format seconds as VTT timestamp (HH:MM:SS.mmm)."""
+    seconds = max(0.0, seconds)
     h = int(seconds // 3600)
     m = int((seconds % 3600) // 60)
     s = int(seconds % 60)

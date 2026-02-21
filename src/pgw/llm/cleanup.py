@@ -26,8 +26,12 @@ def _process_chunk(
     language: str,
     config: LLMConfig,
     context_prefix: str,
+    _depth: int = 0,
 ) -> list[str]:
     """Process a single chunk, retrying with smaller batches on count mismatch."""
+    if _depth >= 3:
+        return texts  # Best-effort: return originals to avoid infinite recursion
+
     numbered = format_numbered_segments(texts)
     messages = [
         {"role": "system", "content": CLEANUP_SYSTEM},
@@ -53,8 +57,8 @@ def _process_chunk(
         f"retrying with smaller batches...[/yellow]"
     )
     mid = len(texts) // 2
-    first_half = _process_chunk(texts[:mid], language, config, context_prefix)
-    second_half = _process_chunk(texts[mid:], language, config, "")
+    first_half = _process_chunk(texts[:mid], language, config, context_prefix, _depth=_depth + 1)
+    second_half = _process_chunk(texts[mid:], language, config, "", _depth=_depth + 1)
     return first_half + second_half
 
 

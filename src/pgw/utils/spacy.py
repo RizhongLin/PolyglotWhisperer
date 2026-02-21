@@ -29,7 +29,9 @@ SPACY_MODELS: dict[str, str] = {
     "lt": "lt_core_news_sm",
     "mk": "mk_core_news_sm",
     "nb": "nb_core_news_sm",
+    "nn": "nb_core_news_sm",  # Nynorsk → Bokmål model
     "nl": "nl_core_news_sm",
+    "no": "nb_core_news_sm",  # Norwegian → Bokmål model
     "pl": "pl_core_news_sm",
     "pt": "pt_core_news_sm",
     "ro": "ro_core_news_sm",

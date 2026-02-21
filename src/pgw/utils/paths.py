@@ -33,14 +33,31 @@ def create_workspace(
     return workspace
 
 
-def workspace_paths(workspace: Path, language: str, target_lang: str | None = None) -> dict:
+_VIDEO_EXTENSIONS = (".mp4", ".mkv", ".webm", ".avi", ".mov", ".ts", ".flv")
+
+
+def find_video(workspace: Path) -> Path | None:
+    """Find the video file in a workspace by globbing known extensions.
+
+    Returns the first match, or None if no video is found.
+    """
+    for ext in _VIDEO_EXTENSIONS:
+        candidates = sorted(workspace.glob(f"video{ext}"))
+        if candidates:
+            return candidates[0]
+    return None
+
+
+def workspace_paths(
+    workspace: Path, language: str, target_lang: str | None = None, video_ext: str = ".mp4"
+) -> dict:
     """Generate standard output paths for a workspace.
 
     Returns a dict with keys: video, audio, transcription_vtt, transcription_txt,
     translation_vtt, translation_txt, bilingual_vtt, metadata.
     """
     paths = {
-        "video": workspace / "video.mp4",
+        "video": workspace / f"video{video_ext}",
         "audio": workspace / "audio.wav",
         "transcription_vtt": workspace / f"transcription.{language}.vtt",
         "transcription_txt": workspace / f"transcription.{language}.txt",

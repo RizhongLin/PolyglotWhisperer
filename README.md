@@ -5,14 +5,14 @@ Video transcription and translation CLI for language learners. Transcribe with W
 ## Features
 
 - **Whisper transcription** with word-level timestamps — local (stable-ts, MLX/CUDA/CPU) or cloud API (Groq, OpenAI via LiteLLM)
-- **Smart subtitle segmentation** — spaCy POS tagging fixes dangling articles, prepositions, and Romance clitics (l', d', qu') across 24 languages
+- **Smart subtitle segmentation** — spaCy POS tagging fixes dangling articles, prepositions, and Romance clitics (l', d', qu') across 26 language codes
 - **LLM translation** — any language via Ollama (local) or cloud LLMs (OpenAI, Groq, Claude, etc.)
 - **Vocabulary analysis** — CEFR difficulty estimation (A1–C2), rare word extraction with context and translations
 - **Parallel text export** — side-by-side PDF/EPUB for printing or e-readers
 - **Batch processing** — multiple files, glob patterns, URL lists, with error-continue
 - **Dual subtitle playback** — original + translation simultaneously in mpv
 - **Audio cache** — shared across workspaces, avoids redundant ffmpeg extraction
-- **Multiple formats** — VTT, SRT, ASS, plain text, bilingual VTT, parallel PDF
+- **Multiple formats** — VTT, SRT, ASS, plain text, bilingual VTT, parallel PDF/EPUB
 - **URL support** — YouTube and other sites via yt-dlp
 
 ## Quick Start
@@ -99,7 +99,7 @@ pgw serve pgw_workspace/my-video/20260217_164802/   # web player
 
 ### Configuration
 
-Config layers (lowest to highest priority): `config/default.toml` → `~/.config/pgw/config.toml` → `./pgw.toml` → `.env` + env vars → CLI flags.
+Config layers (lowest to highest priority): packaged defaults → `~/.config/pgw/config.toml` → `./pgw.toml` → `.env` + env vars → CLI flags.
 
 ```toml
 # pgw.toml
@@ -169,7 +169,7 @@ Video/Audio/URL
   → Extract Audio (ffmpeg, cached)
   → Transcribe (local Whisper or cloud API + spaCy segmentation)
   → Translate (LLM, optional)
-  → Export (VTT/TXT/bilingual VTT/PDF) + Vocabulary Analysis
+  → Export (VTT/TXT/bilingual VTT/PDF/EPUB) + Vocabulary Analysis
   → Play (mpv dual subtitles)
 ```
 
@@ -179,7 +179,7 @@ Video/Audio/URL
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | Transcription | [stable-ts](https://github.com/jianfch/stable-ts) (MLX/CUDA/CPU)                                                               |
 | Cloud APIs    | [LiteLLM](https://github.com/BerriAI/litellm) (Groq, OpenAI, Ollama, Claude)                                                   |
-| NLP           | [spaCy](https://spacy.io/) (24 languages) + [wordfreq](https://github.com/rspeer/wordfreq)                                     |
+| NLP           | [spaCy](https://spacy.io/) (26 language codes) + [wordfreq](https://github.com/rspeer/wordfreq)                                |
 | Export        | [WeasyPrint](https://doc.courtbouillon.org/weasyprint/stable/) (PDF) + [ebooklib](https://github.com/aerkalov/ebooklib) (EPUB) |
 | Subtitles     | [pysubs2](https://github.com/tkarabela/pysubs2)                                                                                |
 | Download      | [yt-dlp](https://github.com/yt-dlp/yt-dlp)                                                                                     |
@@ -188,7 +188,7 @@ Video/Audio/URL
 
 ## Supported Languages
 
-Whisper supports **100 languages** — run `pgw languages` for the full list. spaCy POS tagging and clitic handling covers 24 languages.
+Whisper supports **100 languages** — run `pgw languages` for the full list. spaCy POS tagging and clitic handling covers 26 language codes (including Norwegian `no`/`nn` aliases).
 
 <details>
 <summary>Common language codes</summary>
@@ -209,7 +209,7 @@ Whisper supports **100 languages** — run `pgw languages` for the full list. sp
 
 - [x] Whisper transcription (local + cloud API) with word-level timestamps
 - [x] LLM translation + dual subtitle playback
-- [x] spaCy subtitle segmentation + Romance clitic handling (24 languages)
+- [x] spaCy subtitle segmentation + Romance clitic handling (26 language codes)
 - [x] Audio cache, batch processing, vocabulary analysis, parallel text export
 - [x] Streaming pipeline event system
 - [ ] Hosted demo (Gradio on Hugging Face Spaces)

@@ -11,6 +11,7 @@ dependencies = [
     "pysubs2>=1.8",
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
+    "python-dotenv>=1.0",
     "socksio>=1.0",
 ]
 
@@ -23,7 +24,7 @@ download = [
     "yt-dlp>=2025.1",
 ]
 llm = [
-    "litellm[proxy]>=1.40",
+    "litellm>=1.40",
     "ollama>=0.4",
 ]
 nlp = [
