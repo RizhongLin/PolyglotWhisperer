@@ -1,33 +1,26 @@
 # PolyglotWhisperer
 
-Video and audio transcription and translation tool for language learners. Transcribe media with word-level accuracy using Whisper (locally or via cloud APIs), translate subtitles with LLMs, and play with dual-language subtitles.
-
-Built for watching foreign-language media with accurate, word-for-word subtitles and their translations side by side.
+Video transcription and translation CLI for language learners. Transcribe with Whisper (local or cloud API), translate with LLMs, play with dual subtitles — all in one pipeline.
 
 ## Features
 
-- **Accurate transcription** — Word-level timestamps via Whisper with two backends:
-  - **Local**: stable-ts with MLX on Apple Silicon, CUDA/CPU elsewhere
-  - **Cloud API**: Groq, OpenAI, and other providers via LiteLLM (fast, no GPU needed)
-- **Smart subtitle segmentation** — Custom regrouping by punctuation, gaps, and length; spaCy POS tagging moves dangling articles/prepositions across 24 languages
-- **Romance clitic handling** — Apostrophe-ending tokens (l', d', qu') in French, Italian, Catalan, etc. are kept with the next word, not left dangling
-- **LLM translation** — Translate subtitles to any language using local (Ollama) or cloud LLMs
-- **Dual subtitle playback** — Watch videos with original + translated subtitles simultaneously
-- **Bilingual subtitles** — Single VTT file with original at bottom + translation at top, works in any player
-- **Audio extraction cache** — Shared cache across workspaces avoids redundant ffmpeg extraction
-- **Multiple output formats** — VTT (default), SRT, ASS, and plain text
-- **URL support** — Download and process video or audio from YouTube and other sites via yt-dlp
-- **Local-first** — Runs entirely offline with Ollama + Whisper, no cloud APIs required
+- **Whisper transcription** with word-level timestamps — local (stable-ts, MLX/CUDA/CPU) or cloud API (Groq, OpenAI via LiteLLM)
+- **Smart subtitle segmentation** — spaCy POS tagging fixes dangling articles, prepositions, and Romance clitics (l', d', qu') across 24 languages
+- **LLM translation** — any language via Ollama (local) or cloud LLMs (OpenAI, Groq, Claude, etc.)
+- **Vocabulary analysis** — CEFR difficulty estimation (A1–C2), rare word extraction with context and translations
+- **Parallel text export** — side-by-side PDF/EPUB for printing or e-readers
+- **Batch processing** — multiple files, glob patterns, URL lists, with error-continue
+- **Dual subtitle playback** — original + translation simultaneously in mpv
+- **Audio cache** — shared across workspaces, avoids redundant ffmpeg extraction
+- **Multiple formats** — VTT, SRT, ASS, plain text, bilingual VTT, parallel PDF
+- **URL support** — YouTube and other sites via yt-dlp
 
 ## Quick Start
 
 ### Prerequisites
 
-- Python 3.12+
-- [uv](https://docs.astral.sh/uv/) (package manager)
-- [ffmpeg](https://ffmpeg.org/) (audio extraction)
-- [mpv](https://mpv.io/) (video playback, optional)
-- [Ollama](https://ollama.com/) (local LLM, optional — for translation)
+- Python 3.12+, [uv](https://docs.astral.sh/uv/), [ffmpeg](https://ffmpeg.org/)
+- Optional: [mpv](https://mpv.io/) (playback), [Ollama](https://ollama.com/) (local LLM)
 
 ```bash
 # macOS
@@ -36,8 +29,8 @@ brew install --cask ollama   # optional
 
 # Ubuntu/Debian
 sudo apt install ffmpeg mpv
-curl -fsSL https://astral.sh/uv/install.sh | sh           # uv
-curl -fsSL https://ollama.com/install.sh | sh             # optional
+curl -fsSL https://astral.sh/uv/install.sh | sh
+curl -fsSL https://ollama.com/install.sh | sh   # optional
 ```
 
 ### Installation
@@ -51,220 +44,176 @@ uv sync --all-extras
 ollama pull qwen3:8b
 ```
 
-> **Note:** spaCy language models (for subtitle segmentation) are downloaded automatically on first use.
+spaCy language models are downloaded automatically on first use.
+
+<details>
+<summary>Install only what you need</summary>
+
+```bash
+uv sync --extra transcribe    # Local Whisper (stable-ts, MLX)
+uv sync --extra download      # URL downloading (yt-dlp)
+uv sync --extra llm           # LLM translation (LiteLLM, Ollama)
+uv sync --extra nlp           # spaCy NLP (POS tagging, lemmatizer)
+uv sync --extra vocab         # Vocabulary analysis (wordfreq + spaCy)
+uv sync --extra export        # PDF/EPUB export (WeasyPrint, ebooklib)
+```
+
+</details>
 
 ### API Keys (for cloud providers)
 
-If using cloud APIs (Groq, OpenAI, etc.) for transcription or LLM processing:
-
 ```bash
-cp .env.example .env
-# Edit .env and add your API keys
-```
-
-Or export directly in your shell:
-
-```bash
+cp .env.example .env   # edit and add your keys
+# or export directly:
 export GROQ_API_KEY=gsk_...
 export OPENAI_API_KEY=sk-...
 ```
 
-The `.env` file is loaded automatically on startup. Shell exports take precedence over `.env` values.
-
 ### Usage
 
 ```bash
-# Full pipeline: download, transcribe, translate
+# Full pipeline: download → transcribe → translate → play
 pgw run "https://example.com/video" --translate en --no-play
 
-# Use cloud API for transcription (no local GPU needed)
+# Cloud API transcription (no local GPU needed)
 pgw run "https://example.com/video" --backend api --translate en --no-play
 
-# Override the API model
-pgw run video.mp4 --backend api --model openai/whisper-1 -l fr
+# Batch processing
+pgw run *.mp4 --translate en --no-play
+pgw run urls.txt --backend api --translate en --no-play
 
-# Play from workspace (auto-detects video + bilingual subtitles)
-pgw play pgw_workspace/my-video/20260217_164802/
-
-# Transcribe a local video or audio file
-pgw transcribe ~/Videos/news.mp4 --language fr
-
-# Transcribe via cloud API
-pgw transcribe audio.wav --backend api -l fr
+# Transcribe only
+pgw transcribe video.mp4 -l fr
+pgw transcribe *.mp4 --backend api -l fr
 
 # Translate existing subtitles
 pgw translate subtitles.fr.vtt --to en
 
-# Play with explicit subtitle file
-pgw play video.mp4 --subs transcription.fr.vtt
-pgw play video.mp4 --bilingual bilingual.fr-en.vtt
+# Vocabulary analysis
+pgw vocab pgw_workspace/my-video/20260217_164802/
 
-# Web player (opens browser, no mpv needed)
-pgw serve pgw_workspace/my-video/20260217_164802/
+# Playback
+pgw play pgw_workspace/my-video/20260217_164802/
+pgw serve pgw_workspace/my-video/20260217_164802/   # web player
 ```
 
 ### Configuration
 
-Config is loaded in layers (lowest to highest priority):
-
-1. `config/default.toml` — shipped defaults
-2. `~/.config/pgw/config.toml` — user-level
-3. `./pgw.toml` — project-level
-4. `.env` file + environment variables
-5. CLI flags
-
-Example `pgw.toml`:
+Config layers (lowest to highest priority): `config/default.toml` → `~/.config/pgw/config.toml` → `./pgw.toml` → `.env` + env vars → CLI flags.
 
 ```toml
+# pgw.toml
 [whisper]
 backend = "api"                            # "local" or "api"
-local_model = "large-v3-turbo"             # model for local backend
-api_model = "groq/whisper-large-v3-turbo"  # model for API backend
+api_model = "groq/whisper-large-v3-turbo"
 language = "fr"
 
 [llm]
-model = "ollama_chat/qwen3:8b"             # or "groq/llama-3.3-70b-versatile"
-translation_enabled = true
+model = "ollama_chat/qwen3:8b"
 target_language = "en"
 ```
 
-Environment variables use the `PGW_` prefix with `__` as delimiter:
-
-```bash
-PGW_WHISPER__BACKEND=api
-PGW_WHISPER__LANGUAGE=de
-PGW_LLM__MODEL=groq/llama-3.3-70b-versatile
-```
+Environment variables use `PGW_` prefix: `PGW_WHISPER__BACKEND=api`, `PGW_LLM__MODEL=groq/llama-3.3-70b-versatile`.
 
 ### Workspace Output
 
-Each processed file gets a workspace directory. All cached data lives under `.cache/` — downloaded media and extracted audio are shared across workspaces. Files are symlinked into workspaces (with copy fallback) to avoid duplication.
-
 ```plaintext
 pgw_workspace/
-├── .cache/                              # Shared media cache (cross-workspace)
-│   ├── audio/                           # Extracted audio keyed by video metadata hash
-│   │   └── a1b2c3d4e5f6g7h8.wav
-│   └── downloads/                       # yt-dlp downloaded media (video/audio, URL-keyed)
-│       ├── .downloads.jsonl
-│       └── My Video_abc123.mp4
+├── .cache/                           # Shared media cache
+│   ├── audio/                        # Extracted audio (cross-workspace)
+│   └── downloads/                    # yt-dlp downloads
 └── my-video/
     └── 20260217_164802/
-        ├── video.mp4                    # Symlinked from source (via shared cache utils)
-        ├── audio.wav                    # Symlinked from .cache/audio/
-        ├── transcription.fr.vtt         # Original language subtitles
-        ├── transcription.fr.txt         # Plain text transcript
-        ├── translation.en.vtt           # Translated subtitles
-        ├── translation.en.txt           # Plain text translation
-        ├── bilingual.fr-en.vtt          # Both languages in one file
-        ├── transcription.json           # Full Whisper result (local backend only)
-        └── metadata.json               # Processing parameters and file inventory
+        ├── video.mp4                 # Symlinked from source
+        ├── audio.wav                 # Symlinked from cache
+        ├── transcription.fr.vtt      # Original subtitles
+        ├── transcription.fr.txt      # Plain text
+        ├── translation.en.vtt        # Translated subtitles
+        ├── bilingual.fr-en.vtt       # Dual-language VTT
+        ├── parallel.fr-en.pdf        # Side-by-side PDF
+        ├── vocabulary.fr.json        # CEFR analysis + rare words
+        ├── transcription.json        # Full Whisper result (local only)
+        └── metadata.json
 ```
-
-Both video and audio linking use the same `link_or_copy()` utility from the shared cache module (`utils/cache.py`).
 
 ## Transcription Backends
 
-### Local (default)
-
-Uses [stable-ts](https://github.com/jianfch/stable-ts) to run Whisper locally. Best quality with word-level timestamps and custom regrouping. Requires GPU/large model downloads.
-
-```bash
-pgw transcribe audio.wav -l fr                        # default: large-v3-turbo on MLX
-pgw transcribe audio.wav -l fr --model medium          # smaller model
-pgw transcribe audio.wav -l fr --device cpu             # force CPU
-```
-
-### Cloud API
-
-Uses [LiteLLM](https://github.com/BerriAI/litellm) to call cloud Whisper APIs. Fast, cheap, no GPU needed. Requires API key. 25 MB file size limit per request.
+| Backend             | Technology                                        | Pros                                                   | Limits                             |
+| ------------------- | ------------------------------------------------- | ------------------------------------------------------ | ---------------------------------- |
+| **Local** (default) | [stable-ts](https://github.com/jianfch/stable-ts) | Best quality, word-level timestamps, custom regrouping | Requires GPU / model downloads     |
+| **Cloud API**       | [LiteLLM](https://github.com/BerriAI/litellm)     | Fast, cheap, no GPU                                    | 25 MB file limit, API key required |
 
 ```bash
-pgw transcribe audio.wav --backend api -l fr                             # default: groq/whisper-large-v3-turbo
-pgw transcribe audio.wav --backend api --model openai/whisper-1 -l fr    # OpenAI
+# Local
+pgw transcribe audio.wav -l fr                     # large-v3-turbo on MLX
+pgw transcribe audio.wav -l fr --model medium       # smaller model
+
+# Cloud API
+pgw transcribe audio.wav --backend api -l fr                          # Groq (default)
+pgw transcribe audio.wav --backend api --model openai/whisper-1 -l fr  # OpenAI
 ```
 
-Supported API providers (any LiteLLM-compatible transcription endpoint):
+## Vocabulary Analysis
 
-- **Groq**: `groq/whisper-large-v3-turbo`, `groq/whisper-large-v3` — fast, free tier available
-- **OpenAI**: `openai/whisper-1` — supports word-level timestamps natively
+Each processed video gets a vocabulary profile: CEFR level estimation via [wordfreq](https://github.com/rspeer/wordfreq), top 30 rare words with context and translation, spaCy lemmatization to group inflected forms.
 
-For long audio files exceeding 25 MB, use `--start` and `--duration` to clip, or use the local backend.
-
-## Supported Languages
-
-Whisper supports **100 languages** for transcription with word-level timestamps via stable-ts. Run `pgw languages` to see the full list.
-
-<details>
-<summary>Common language codes</summary>
-
-| Code | Language   | Alignment |
-| ---- | ---------- | --------- |
-| `fr` | French     | yes       |
-| `en` | English    | yes       |
-| `de` | German     | yes       |
-| `es` | Spanish    | yes       |
-| `it` | Italian    | yes       |
-| `pt` | Portuguese | yes       |
-| `nl` | Dutch      | yes       |
-| `zh` | Chinese    | yes       |
-| `ja` | Japanese   | yes       |
-| `ko` | Korean     | yes       |
-| `ar` | Arabic     | yes       |
-| `ru` | Russian    | yes       |
-| `hi` | Hindi      | yes       |
-| `tr` | Turkish    | yes       |
-| `pl` | Polish     | yes       |
-| `sv` | Swedish    | yes       |
-| `da` | Danish     | yes       |
-| `fi` | Finnish    | yes       |
-| `uk` | Ukrainian  | yes       |
-| `vi` | Vietnamese | yes       |
-
-</details>
+```bash
+pgw vocab pgw_workspace/my-video/20260217_164802/ --top 50
+```
 
 ## How It Works
 
 ```plaintext
 Video/Audio/URL
   → Download (yt-dlp, cached)
-  → Extract Audio (ffmpeg, cached across workspaces)
-  → Transcription
-      ├─ Local: stable-ts Whisper → regroup + spaCy function word fix
-      └─ API:   LiteLLM → word regrouping → spaCy clitic fix
-  → LLM Translation (optional)
-  → Save VTT/TXT + bilingual VTT
-  → Play with dual subtitles in mpv
+  → Extract Audio (ffmpeg, cached)
+  → Transcribe (local Whisper or cloud API + spaCy segmentation)
+  → Translate (LLM, optional)
+  → Export (VTT/TXT/bilingual VTT/PDF) + Vocabulary Analysis
+  → Play (mpv dual subtitles)
 ```
 
 ## Tech Stack
 
-| Component       | Technology                                                                         |
-| --------------- | ---------------------------------------------------------------------------------- |
-| Transcription   | [stable-ts](https://github.com/jianfch/stable-ts) (local, MLX/CUDA/CPU)            |
-| Cloud Whisper   | [LiteLLM](https://github.com/BerriAI/litellm) (Groq, OpenAI, etc.)                 |
-| LLM Integration | [LiteLLM](https://github.com/BerriAI/litellm) (Ollama, OpenAI, Claude, Groq, etc.) |
-| Local LLM       | [Ollama](https://ollama.com/) with Qwen 3 (default)                                |
-| Video Download  | [yt-dlp](https://github.com/yt-dlp/yt-dlp)                                         |
-| NLP             | [spaCy](https://spacy.io/) (POS tagging for subtitle segmentation, 24 languages)   |
-| Subtitle I/O    | [pysubs2](https://github.com/tkarabela/pysubs2)                                    |
-| Video Playback  | [mpv](https://mpv.io/) (system binary, no Python binding needed)                   |
-| CLI             | [Typer](https://typer.tiangolo.com/) + [Rich](https://github.com/Textualize/rich)  |
+| Component     | Technology                                                                                                                     |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Transcription | [stable-ts](https://github.com/jianfch/stable-ts) (MLX/CUDA/CPU)                                                               |
+| Cloud APIs    | [LiteLLM](https://github.com/BerriAI/litellm) (Groq, OpenAI, Ollama, Claude)                                                   |
+| NLP           | [spaCy](https://spacy.io/) (24 languages) + [wordfreq](https://github.com/rspeer/wordfreq)                                     |
+| Export        | [WeasyPrint](https://doc.courtbouillon.org/weasyprint/stable/) (PDF) + [ebooklib](https://github.com/aerkalov/ebooklib) (EPUB) |
+| Subtitles     | [pysubs2](https://github.com/tkarabela/pysubs2)                                                                                |
+| Download      | [yt-dlp](https://github.com/yt-dlp/yt-dlp)                                                                                     |
+| Playback      | [mpv](https://mpv.io/)                                                                                                         |
+| CLI           | [Typer](https://typer.tiangolo.com/) + [Rich](https://github.com/Textualize/rich)                                              |
+
+## Supported Languages
+
+Whisper supports **100 languages** — run `pgw languages` for the full list. spaCy POS tagging and clitic handling covers 24 languages.
+
+<details>
+<summary>Common language codes</summary>
+
+| Code | Language   | Code | Language | Code | Language   |
+| ---- | ---------- | ---- | -------- | ---- | ---------- |
+| `fr` | French     | `zh` | Chinese  | `pl` | Polish     |
+| `en` | English    | `ja` | Japanese | `sv` | Swedish    |
+| `de` | German     | `ko` | Korean   | `da` | Danish     |
+| `es` | Spanish    | `ar` | Arabic   | `fi` | Finnish    |
+| `it` | Italian    | `ru` | Russian  | `uk` | Ukrainian  |
+| `pt` | Portuguese | `hi` | Hindi    | `vi` | Vietnamese |
+| `nl` | Dutch      | `tr` | Turkish  |      |            |
+
+</details>
 
 ## Roadmap
 
-- [x] Project setup
-- [x] stable-ts transcription with word-level timestamps
-- [x] LLM subtitle translation
-- [x] yt-dlp video download
-- [x] mpv dual-subtitle playback
-- [x] Full pipeline CLI (`pgw run`)
-- [x] Web-based player alternative (`pgw serve`)
-- [x] spaCy-based subtitle segmentation (dangling function word fix, 24 languages)
-- [x] Cloud API transcription backend (Groq, OpenAI via LiteLLM)
-- [x] Audio extraction cache (shared across workspaces)
-- [x] Unified clitic handling for Romance languages
-- [ ] Vocabulary extraction for language learners
+- [x] Whisper transcription (local + cloud API) with word-level timestamps
+- [x] LLM translation + dual subtitle playback
+- [x] spaCy subtitle segmentation + Romance clitic handling (24 languages)
+- [x] Audio cache, batch processing, vocabulary analysis, parallel text export
+- [x] Streaming pipeline event system
+- [ ] Hosted demo (Gradio on Hugging Face Spaces)
+- [ ] Speaker diarization
 - [ ] Anki card generation from subtitle pairs
 
 ## License

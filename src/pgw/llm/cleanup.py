@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Callable
+
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from pgw.core.config import LLMConfig
@@ -17,7 +19,6 @@ from pgw.utils.console import console
 
 CHUNK_SIZE = 20
 OVERLAP = 2  # Context overlap between chunks for coherence
-MAX_RETRIES = 2  # Retry with smaller batch on count mismatch
 
 
 def _process_chunk(
@@ -62,6 +63,7 @@ def cleanup_subtitles(
     language: str,
     config: LLMConfig,
     chunk_size: int = CHUNK_SIZE,
+    on_progress: Callable[[float], None] | None = None,
 ) -> list[SubtitleSegment]:
     """Clean up subtitle segments using an LLM.
 
@@ -74,6 +76,7 @@ def cleanup_subtitles(
         language: Language of the subtitles (e.g. "fr").
         config: LLM configuration.
         chunk_size: Number of segments per LLM call.
+        on_progress: Optional callback receiving progress fraction (0.0–1.0).
 
     Returns:
         New list of SubtitleSegments with cleaned text.
@@ -150,6 +153,9 @@ def cleanup_subtitles(
                 )
 
             progress.advance(task)
+            if on_progress:
+                chunk_idx = i // chunk_size + 1
+                on_progress(chunk_idx / total_chunks)
 
     console.print(f"[green]Cleanup complete:[/green] {len(cleaned)} segments")
     return cleaned

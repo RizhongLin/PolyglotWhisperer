@@ -6,6 +6,7 @@ import gc
 from pathlib import Path
 
 from pgw.core.config import PGWConfig
+from pgw.core.events import EventCallback, PipelineEvent
 from pgw.downloader.resolver import is_url, resolve
 from pgw.utils.audio import extract_audio_cached
 from pgw.utils.cache import link_or_copy
@@ -21,6 +22,7 @@ def run_pipeline(
     play: bool = True,
     start: str | None = None,
     duration: str | None = None,
+    on_event: EventCallback | None = None,
 ) -> Path:
     """Run the full processing pipeline.
 
@@ -32,13 +34,22 @@ def run_pipeline(
         play: Whether to play the video with subtitles after processing.
         start: Start time for audio clipping (ffmpeg format).
         duration: Duration to extract (ffmpeg format).
+        on_event: Optional callback for streaming progress events.
 
     Returns:
         Path to the workspace directory.
     """
+
+    def emit(stage: str, progress: float, message: str, data: dict | None = None) -> None:
+        if on_event:
+            on_event(PipelineEvent(stage=stage, progress=progress, message=message, data=data))
+
     language = config.whisper.language
+    segments: list | None = None
+    trans_result = None
 
     # Step 1: Resolve input
+    emit("download", 0.0, f"Resolving input: {input_path}")
     if is_url(input_path):
         console.print(f"[bold]Downloading:[/bold] {input_path}")
         source = resolve(input_path, output_dir=config.download_dir)
@@ -49,6 +60,7 @@ def run_pipeline(
         if not path.is_file():
             raise FileNotFoundError(f"File not found: {input_path}")
         source = VideoSource(video_path=path, title=path.stem)
+    emit("download", 1.0, "Input resolved")
 
     # Step 2: Create workspace
     title = source.title or source.video_path.stem
@@ -62,6 +74,7 @@ def run_pipeline(
         link_or_copy(source.video_path, video_dest)
 
     # Step 3: Extract audio (with cross-workspace cache)
+    emit("audio", 0.0, "Extracting audio...")
     audio_path = paths["audio"]
     if not audio_path.is_file():
         clip_msg = ""
@@ -84,6 +97,7 @@ def run_pipeline(
             console.print("[dim]Audio found in cache.[/dim]")
     else:
         console.print("[dim]Audio already extracted, skipping.[/dim]")
+    emit("audio", 1.0, "Audio ready")
 
     # Step 4: Transcribe (with resume support)
     vtt_path = paths["transcription_vtt"]
@@ -93,6 +107,7 @@ def run_pipeline(
     llm_was_used = False
     use_api = config.whisper.backend == "api"
 
+    emit("transcribe", 0.0, "Transcribing...")
     if not vtt_path.is_file():
         if use_api:
             # API transcription — returns segments directly, no WhisperResult
@@ -144,8 +159,18 @@ def run_pipeline(
             if cleanup and config.llm.cleanup_enabled:
                 from pgw.llm.cleanup import cleanup_subtitles
 
+                emit("transcribe", 0.5, "Cleaning up transcription...")
                 console.print("[bold]Cleaning up transcription...[/bold]")
-                segments = cleanup_subtitles(segments, language, config.llm)
+
+                def _on_cleanup_progress(frac: float) -> None:
+                    emit("transcribe", 0.5 + frac * 0.5, f"Cleaning ({frac:.0%})...")
+
+                segments = cleanup_subtitles(
+                    segments,
+                    language,
+                    config.llm,
+                    on_progress=_on_cleanup_progress,
+                )
                 llm_was_used = True
 
             save_subtitles(segments, vtt_path, fmt="vtt")
@@ -161,6 +186,8 @@ def run_pipeline(
             segments = load_subtitles(vtt_path)
             segments = fix_dangling_clitics(segments, language)
 
+    emit("transcribe", 1.0, "Transcription complete")
+
     # Step 5: Optional translation
     if translate:
         trans_vtt = paths["translation_vtt"]
@@ -168,8 +195,19 @@ def run_pipeline(
             from pgw.llm.translator import translate_subtitles
             from pgw.subtitles.converter import save_bilingual_vtt, save_subtitles
 
+            emit("translate", 0.0, f"Translating to {translate}...")
             console.print(f"[bold]Translating to {translate}...[/bold]")
-            trans_result = translate_subtitles(segments, language, translate, config.llm)
+
+            def _on_translate_progress(frac: float) -> None:
+                emit("translate", frac, f"Translating ({frac:.0%})...")
+
+            trans_result = translate_subtitles(
+                segments,
+                language,
+                translate,
+                config.llm,
+                on_progress=_on_translate_progress,
+            )
             llm_was_used = True
 
             save_subtitles(trans_result.translated, trans_vtt, fmt="vtt")
@@ -183,8 +221,56 @@ def run_pipeline(
             bi_vtt = paths["bilingual_vtt"]
             save_bilingual_vtt(segments, trans_result.translated, bi_vtt)
             console.print(f"[green]Saved:[/green] {bi_vtt}")
+            emit("translate", 1.0, "Translation complete")
+
+            # Parallel text export (best-effort, requires export extras)
+            try:
+                from pgw.subtitles.export import export_parallel_pdf
+
+                pdf_path = workspace / f"parallel.{language}-{translate}.pdf"
+                export_parallel_pdf(
+                    segments,
+                    trans_result.translated,
+                    pdf_path,
+                    language,
+                    translate,
+                    title=title,
+                )
+                console.print(f"[green]Saved:[/green] {pdf_path}")
+            except ImportError:
+                pass
+            except Exception as e:
+                console.print(f"[yellow]PDF export skipped:[/yellow] {e}")
         else:
             console.print("[dim]Translation found, skipping.[/dim]")
+
+    # Step 5.5: Vocabulary summary (best-effort)
+    emit("vocab", 0.0, "Generating vocabulary summary...")
+    try:
+        from pgw.vocab.summary import generate_vocab_summary
+
+        trans_segs = trans_result.translated if trans_result is not None else None
+        # Ensure segments are loaded (may not be if no LLM processing was done)
+        if not segments:
+            from pgw.subtitles.converter import load_subtitles
+
+            segments = load_subtitles(vtt_path)
+
+        summary = generate_vocab_summary(segments, language, translated_segments=trans_segs)
+
+        import json
+
+        summary_path = workspace / f"vocabulary.{language}.json"
+        summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+        console.print(
+            f"[green]Vocabulary:[/green] {summary['unique_lemmas']} unique lemmas, "
+            f"estimated {summary['estimated_level']}"
+        )
+    except ImportError:
+        pass  # wordfreq or spacy not installed
+    except Exception as e:
+        console.print(f"[yellow]Vocabulary summary skipped:[/yellow] {e}")
+    emit("vocab", 1.0, "Vocabulary summary done")
 
     # Unload Ollama model from GPU only if LLM was actually used
     if llm_was_used:
@@ -193,6 +279,7 @@ def run_pipeline(
         unload_ollama_model(config.llm.model)
 
     # Step 6: Save metadata
+    emit("save", 0.0, "Saving metadata...")
     save_metadata(
         workspace,
         source_url=source.source_url,
@@ -223,5 +310,6 @@ def run_pipeline(
         else:
             console.print("[yellow]mpv not found, skipping playback.[/yellow]")
 
+    emit("save", 1.0, "Done", data={"workspace": str(workspace)})
     console.print(f"\n[bold green]Done![/bold green] Workspace: {workspace}")
     return workspace

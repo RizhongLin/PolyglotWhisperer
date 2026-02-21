@@ -9,6 +9,7 @@ from pgw.cli.run import run
 from pgw.cli.serve import serve
 from pgw.cli.transcribe import transcribe
 from pgw.cli.translate import translate
+from pgw.cli.vocab import vocab
 
 app = typer.Typer(
     name="pgw",
@@ -31,3 +32,4 @@ app.command("translate")(translate)
 app.command("play")(play)
 app.command("serve")(serve)
 app.command("languages")(languages)
+app.command("vocab")(vocab)

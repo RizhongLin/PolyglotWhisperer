@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Callable
+
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from pgw.core.config import LLMConfig
@@ -70,6 +72,7 @@ def translate_subtitles(
     target_lang: str,
     config: LLMConfig,
     chunk_size: int = CHUNK_SIZE,
+    on_progress: Callable[[float], None] | None = None,
 ) -> TranslationResult:
     """Translate subtitle segments using an LLM.
 
@@ -84,6 +87,7 @@ def translate_subtitles(
         target_lang: Target language code (e.g. "en").
         config: LLM configuration.
         chunk_size: Number of segments per LLM call.
+        on_progress: Optional callback receiving progress fraction (0.0–1.0).
 
     Returns:
         TranslationResult with original and translated segments.
@@ -170,14 +174,20 @@ def translate_subtitles(
                         text=final_text,
                         start=seg.start,
                         end=seg.end,
+                        speaker=seg.speaker,
                     )
                 )
 
-            # Update history with non-empty results only
-            recent_source.extend(non_empty_texts)
-            recent_translated.extend(t for t in translated_texts if t.strip())
+            # Update history — keep source/translation pairs aligned
+            for src, trans in zip(non_empty_texts, result_texts):
+                if trans.strip():
+                    recent_source.append(src)
+                    recent_translated.append(trans)
 
             progress.advance(task)
+            if on_progress:
+                chunk_idx = i // chunk_size + 1
+                on_progress(chunk_idx / total_chunks)
 
     console.print(f"[green]Translation complete:[/green] {len(translated)} segments")
 

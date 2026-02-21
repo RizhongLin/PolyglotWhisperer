@@ -6,17 +6,19 @@ from pathlib import Path
 from typing import Annotated, Optional
 
 import typer
+from rich.table import Table
 
-from pgw.core.config import load_config
+from pgw.cli.utils import expand_inputs
+from pgw.core.config import PGWConfig, load_config
 from pgw.downloader.resolver import is_url, resolve
 from pgw.utils.audio import extract_audio
 from pgw.utils.console import console
 
 
 def transcribe(
-    input_path: Annotated[
-        str,
-        typer.Argument(help="Path to video/audio file, or a URL."),
+    inputs: Annotated[
+        list[str],
+        typer.Argument(help="URLs, file paths, or glob patterns. Accepts multiple inputs."),
     ],
     language: Annotated[
         str,
@@ -63,7 +65,11 @@ def transcribe(
         typer.Option(help="Transcription backend: local or api."),
     ] = None,
 ) -> None:
-    """Transcribe a video or audio file (or URL) to subtitles with word-level timestamps."""
+    """Transcribe video/audio files (or URLs) to subtitles with word-level timestamps.
+
+    Accepts multiple inputs — files, URLs, glob patterns (*.mp4), or .txt
+    files containing one URL/path per line.
+    """
     from pgw.core.languages import validate_language
 
     try:
@@ -85,6 +91,82 @@ def transcribe(
         overrides["whisper.backend"] = backend
     config = load_config(**overrides)
 
+    expanded = expand_inputs(inputs)
+    if not expanded:
+        console.print("[red]No inputs resolved. Check your paths or patterns.[/red]")
+        raise typer.Exit(1)
+
+    # Single input — original behavior
+    if len(expanded) == 1:
+        _transcribe_single(
+            expanded[0],
+            config,
+            language,
+            fmt,
+            output,
+            not no_txt,
+            cleanup,
+            start,
+            duration,
+        )
+        return
+
+    # Batch mode — output flag ignored, process each
+    if output is not None:
+        console.print("[yellow]--output ignored in batch mode (auto-naming per file).[/yellow]")
+
+    results: list[tuple[str, str, str]] = []
+    console.print(f"[bold]Batch transcribing {len(expanded)} inputs...[/bold]\n")
+
+    for i, input_path in enumerate(expanded, 1):
+        console.rule(f"[bold][{i}/{len(expanded)}] {input_path}[/bold]")
+        try:
+            _transcribe_single(
+                input_path,
+                config,
+                language,
+                fmt,
+                None,
+                not no_txt,
+                cleanup,
+                start,
+                duration,
+            )
+            results.append((input_path, "success", ""))
+        except Exception as e:
+            console.print(f"[red]Failed:[/red] {e}")
+            results.append((input_path, "failed", str(e)))
+
+    # Summary table
+    console.print()
+    table = Table(title=f"Batch Results ({len(expanded)} files)")
+    table.add_column("#", justify="right", style="dim")
+    table.add_column("Input", max_width=50, no_wrap=True)
+    table.add_column("Status")
+
+    succeeded = 0
+    for i, (inp, status, _) in enumerate(results, 1):
+        style = "green" if status == "success" else "red"
+        table.add_row(str(i), inp, f"[{style}]{status}[/{style}]")
+        if status == "success":
+            succeeded += 1
+
+    console.print(table)
+    console.print(f"\n[bold]{succeeded}/{len(expanded)} succeeded[/bold]")
+
+
+def _transcribe_single(
+    input_path: str,
+    config: PGWConfig,
+    language: str,
+    fmt: str,
+    output: Path | None,
+    save_txt: bool,
+    cleanup: bool,
+    start: str | None,
+    duration: str | None,
+) -> None:
+    """Transcribe a single input file or URL."""
     # Resolve input: URL → download, local path → use directly
     if is_url(input_path):
         console.print(f"[bold]Downloading:[/bold] {input_path}")
@@ -93,8 +175,7 @@ def transcribe(
     else:
         video_path = Path(input_path)
         if not video_path.is_file():
-            console.print(f"[red]File not found:[/red] {input_path}")
-            raise typer.Exit(1)
+            raise FileNotFoundError(f"File not found: {input_path}")
 
     # Extract audio if input is a video file
     audio_suffixes = {".wav", ".mp3", ".flac", ".ogg", ".m4a"}
@@ -155,7 +236,7 @@ def transcribe(
     console.print(f"[green]Saved:[/green] {sub_path}")
 
     # Also save plain text version
-    if not no_txt:
+    if save_txt:
         txt_path = sub_path.with_suffix(".txt")
         if txt_path != sub_path:
             if use_api or cleanup:

@@ -30,8 +30,16 @@ nlp = [
     "spacy>=3.7",
     "pip",
 ]
+vocab = [
+    "wordfreq>=3.1",
+    "pgw[nlp]",
+]
+export = [
+    "weasyprint>=62",
+    "ebooklib>=0.18",
+]
 all = [
-    "pgw[transcribe,download,llm,nlp]",
+    "pgw[transcribe,download,llm,nlp,vocab,export]",
 ]
 dev = [
     "pytest>=8.0",

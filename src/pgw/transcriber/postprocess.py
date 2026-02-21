@@ -11,6 +11,7 @@ import copy
 
 from pgw.core.models import SubtitleSegment
 from pgw.utils.console import console
+from pgw.utils.spacy import load_spacy_model
 
 # POS tags that should not dangle at the end of a subtitle segment.
 # DET = determiners (le/la/les/the/der/die/das/el/la/los...)
@@ -19,74 +20,6 @@ _DANGLING_POS = {"DET", "ADP"}
 
 # Apostrophe characters used in Romance language clitics (l', d', qu', etc.)
 _APOSTROPHES = {"'", "\u2019"}
-
-# Mapping from pgw language codes to spaCy model names.
-# Languages without a model here gracefully skip the function-word fix.
-_SPACY_MODELS: dict[str, str] = {
-    "ca": "ca_core_news_sm",
-    "da": "da_core_news_sm",
-    "de": "de_core_news_sm",
-    "el": "el_core_news_sm",
-    "en": "en_core_web_sm",
-    "es": "es_core_news_sm",
-    "fi": "fi_core_news_sm",
-    "fr": "fr_core_news_sm",
-    "hr": "hr_core_news_sm",
-    "it": "it_core_news_sm",
-    "ja": "ja_core_news_sm",
-    "ko": "ko_core_news_sm",
-    "lt": "lt_core_news_sm",
-    "mk": "mk_core_news_sm",
-    "nb": "nb_core_news_sm",
-    "nl": "nl_core_news_sm",
-    "pl": "pl_core_news_sm",
-    "pt": "pt_core_news_sm",
-    "ro": "ro_core_news_sm",
-    "ru": "ru_core_news_sm",
-    "sl": "sl_core_news_sm",
-    "sv": "sv_core_news_sm",
-    "uk": "uk_core_news_sm",
-    "zh": "zh_core_web_sm",
-}
-
-_spacy_cache: dict[str, object] = {}
-
-
-def _load_spacy_model(language: str):
-    """Load a spaCy model for POS tagging, auto-downloading if needed.
-
-    Returns the loaded model, or None if spaCy is not installed or the
-    language has no model available.  Results are cached per language.
-    """
-    if language in _spacy_cache:
-        return _spacy_cache[language]
-
-    try:
-        import spacy
-    except ImportError:
-        _spacy_cache[language] = None
-        return None
-
-    model_name = _SPACY_MODELS.get(language)
-    if model_name is None:
-        _spacy_cache[language] = None
-        return None
-
-    try:
-        nlp = spacy.load(model_name, disable=["parser", "lemmatizer", "ner"])
-    except OSError:
-        # Model not installed — auto-download
-        console.print(f"[bold]Downloading spaCy model:[/bold] {model_name}")
-        try:
-            spacy.cli.download(model_name)
-            nlp = spacy.load(model_name, disable=["parser", "lemmatizer", "ner"])
-        except (SystemExit, Exception):
-            console.print(f"[yellow]Could not load spaCy model {model_name}, skipping.[/yellow]")
-            _spacy_cache[language] = None
-            return None
-
-    _spacy_cache[language] = nlp
-    return nlp
 
 
 def regroup_for_subtitles(result, max_chars: int = 50) -> None:
@@ -120,7 +53,7 @@ def fix_dangling_function_words(result, language: str) -> None:
     (ADP) at segment boundaries.  Works for any language with a spaCy
     model.  Falls back silently if spaCy is not installed.
     """
-    nlp = _load_spacy_model(language)
+    nlp = load_spacy_model(language)
     if nlp is None:
         return
 
@@ -178,7 +111,7 @@ def fix_dangling_clitics(segments: list[SubtitleSegment], language: str) -> list
        — uses simple text check, handles spaCy splitting "l'" into ["l", "'"]
     2. Trailing DET/ADP POS tags — uses spaCy
     """
-    nlp = _load_spacy_model(language)
+    nlp = load_spacy_model(language)
     if nlp is None:
         return segments
 

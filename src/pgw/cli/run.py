@@ -5,14 +5,16 @@ from __future__ import annotations
 from typing import Annotated, Optional
 
 import typer
+from rich.table import Table
 
+from pgw.cli.utils import expand_inputs
 from pgw.core.config import load_config
 
 
 def run(
-    input_path: Annotated[
-        str,
-        typer.Argument(help="URL or path to video/audio file."),
+    inputs: Annotated[
+        list[str],
+        typer.Argument(help="URLs, file paths, or glob patterns. Accepts multiple inputs."),
     ],
     language: Annotated[
         str,
@@ -55,7 +57,11 @@ def run(
         typer.Option(help="Transcription backend: local or api."),
     ] = None,
 ) -> None:
-    """Run the full pipeline: download, transcribe, translate, and play."""
+    """Run the full pipeline: download, transcribe, translate, and play.
+
+    Accepts multiple inputs — files, URLs, glob patterns (*.mp4), or .txt
+    files containing one URL/path per line.
+    """
     from pgw.core.languages import validate_language
     from pgw.core.pipeline import run_pipeline
     from pgw.utils.console import console as _console
@@ -89,12 +95,59 @@ def run(
 
     config = load_config(**overrides)
 
-    run_pipeline(
-        input_path=input_path,
-        config=config,
-        translate=translate,
-        cleanup=cleanup,
-        play=not no_play,
-        start=start,
-        duration=duration,
-    )
+    expanded = expand_inputs(inputs)
+    if not expanded:
+        _console.print("[red]No inputs resolved. Check your paths or patterns.[/red]")
+        raise typer.Exit(1)
+
+    # Single input — original behavior
+    if len(expanded) == 1:
+        run_pipeline(
+            input_path=expanded[0],
+            config=config,
+            translate=translate,
+            cleanup=cleanup,
+            play=not no_play,
+            start=start,
+            duration=duration,
+        )
+        return
+
+    # Batch mode — process each, collect results
+    results: list[tuple[str, str, str]] = []  # (input, status, workspace)
+    _console.print(f"[bold]Batch processing {len(expanded)} inputs...[/bold]\n")
+
+    for i, input_path in enumerate(expanded, 1):
+        _console.rule(f"[bold][{i}/{len(expanded)}] {input_path}[/bold]")
+        try:
+            workspace = run_pipeline(
+                input_path=input_path,
+                config=config,
+                translate=translate,
+                cleanup=cleanup,
+                play=False,  # Never auto-play in batch mode
+                start=start,
+                duration=duration,
+            )
+            results.append((input_path, "success", str(workspace)))
+        except Exception as e:
+            _console.print(f"[red]Failed:[/red] {e}")
+            results.append((input_path, "failed", str(e)))
+
+    # Summary table
+    _console.print()
+    table = Table(title=f"Batch Results ({len(expanded)} files)")
+    table.add_column("#", justify="right", style="dim")
+    table.add_column("Input", max_width=50, no_wrap=True)
+    table.add_column("Status")
+    table.add_column("Output", max_width=50, no_wrap=True)
+
+    succeeded = 0
+    for i, (inp, status, output) in enumerate(results, 1):
+        style = "green" if status == "success" else "red"
+        table.add_row(str(i), inp, f"[{style}]{status}[/{style}]", output)
+        if status == "success":
+            succeeded += 1
+
+    _console.print(table)
+    _console.print(f"\n[bold]{succeeded}/{len(expanded)} succeeded[/bold]")
