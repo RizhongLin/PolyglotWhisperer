@@ -24,9 +24,9 @@ def run(
         Optional[str],
         typer.Option("--translate", "-t", help="Target language for translation."),
     ] = None,
-    model: Annotated[
+    whisper_model: Annotated[
         Optional[str],
-        typer.Option("--model", "-m", help="Model for the active backend."),
+        typer.Option("--whisper-model", "-w", help="Whisper model (e.g. large-v3-turbo)."),
     ] = None,
     device: Annotated[
         str,
@@ -83,9 +83,9 @@ def run(
         "whisper.language": language,
         "whisper.device": device,
     }
-    if model is not None:
+    if whisper_model is not None:
         model_key = "whisper.api_model" if backend == "api" else "whisper.local_model"
-        overrides[model_key] = model
+        overrides[model_key] = whisper_model
     if llm_model is not None:
         overrides["llm.model"] = llm_model
     if backend is not None:
