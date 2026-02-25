@@ -52,6 +52,10 @@ def run(
         Optional[str],
         typer.Option("--llm-model", help="LLM model (e.g. ollama_chat/qwen3:8b)."),
     ] = None,
+    llm_backend: Annotated[
+        Optional[str],
+        typer.Option(help="LLM backend: local or api."),
+    ] = None,
     backend: Annotated[
         Optional[str],
         typer.Option(help="Transcription backend: local or api."),
@@ -87,7 +91,10 @@ def run(
         model_key = "whisper.api_model" if backend == "api" else "whisper.local_model"
         overrides[model_key] = whisper_model
     if llm_model is not None:
-        overrides["llm.model"] = llm_model
+        model_key = "llm.api_model" if llm_backend == "api" else "llm.local_model"
+        overrides[model_key] = llm_model
+    if llm_backend is not None:
+        overrides["llm.backend"] = llm_backend
     if backend is not None:
         overrides["whisper.backend"] = backend
     if translate is not None:

@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import gc
+import json
 from pathlib import Path
 
 from pgw.core.config import PGWConfig
 from pgw.core.events import EventCallback, PipelineEvent
 from pgw.downloader.resolver import is_url, resolve
 from pgw.utils.audio import extract_audio_cached
-from pgw.utils.cache import link_or_copy
+from pgw.utils.cache import cache_key, get_cache_dir, link_or_copy
 from pgw.utils.console import console
 from pgw.utils.paths import create_workspace, save_metadata, workspace_paths
 
@@ -100,30 +101,51 @@ def run_pipeline(
         console.print("[dim]Audio already extracted, skipping.[/dim]")
     emit("audio", 1.0, "Audio ready")
 
-    # Step 4: Transcribe (with resume support)
+    # Step 4: Transcribe (with shared cache)
     vtt_path = paths["transcription_vtt"]
     txt_path = paths["transcription_txt"]
-    json_path = workspace / "transcription.json"
     needs_llm = (cleanup and config.llm.cleanup_enabled) or translate
     llm_was_used = False
     use_api = config.whisper.backend == "api"
 
+    # Shared transcription cache: .cache/transcriptions/<hash>.json
+    trans_cache_dir = get_cache_dir(config.workspace_dir, "transcriptions")
+    trans_cache_key = cache_key(
+        audio_path, model=config.whisper.model, backend=config.whisper.backend
+    )
+    trans_cache_path = trans_cache_dir / f"{trans_cache_key}.json"
+
     emit("transcribe", 0.0, "Transcribing...")
     if not vtt_path.is_file():
-        if use_api:
+        if use_api and trans_cache_path.is_file():
+            # Cache hit: load API segments from shared cache
+            console.print("[dim]Transcription found in cache, loading...[/dim]")
+            from pgw.core.models import SubtitleSegment
+
+            raw = json.loads(trans_cache_path.read_text(encoding="utf-8"))
+            segments = [SubtitleSegment(**s) for s in raw]
+
+        elif use_api:
             # API transcription — returns segments directly, no WhisperResult
             from pgw.transcriber.api import transcribe as api_transcribe
 
-            segments = api_transcribe(audio_path, config.whisper)
+            segments = api_transcribe(audio_path, config.whisper, config.workspace_dir)
 
-        elif json_path.is_file() and needs_llm:
-            # Resume: transcription JSON cached from interrupted run
-            console.print("[dim]Transcription JSON found, loading segments...[/dim]")
+            # Save to shared cache
+            raw = [{"text": s.text, "start": s.start, "end": s.end} for s in segments]
+            trans_cache_path.write_text(
+                json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            console.print("[dim]Transcription cached.[/dim]")
+
+        elif trans_cache_path.is_file() and needs_llm:
+            # Cache hit: load local transcription from shared cache
+            console.print("[dim]Transcription found in cache, loading...[/dim]")
             import stable_whisper
 
             from pgw.subtitles.converter import result_to_segments
 
-            result = stable_whisper.WhisperResult(str(json_path))
+            result = stable_whisper.WhisperResult(str(trans_cache_path))
             segments = result_to_segments(result)
             del result
         else:
@@ -131,9 +153,9 @@ def run_pipeline(
 
             result = transcribe(audio_path, config.whisper)
 
-            # Save full result as JSON for reprocessing
-            result.save_as_json(str(json_path))
-            console.print(f"[green]Saved:[/green] {json_path}")
+            # Save full result to shared cache
+            result.save_as_json(str(trans_cache_path))
+            console.print("[dim]Transcription cached.[/dim]")
 
             if needs_llm:
                 from pgw.subtitles.converter import result_to_segments
@@ -276,8 +298,6 @@ def run_pipeline(
             segments = load_subtitles(vtt_path)
 
         summary = generate_vocab_summary(segments, language, translated_segments=trans_segs)
-
-        import json
 
         summary_path = workspace / f"vocabulary.{language}.json"
         summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")

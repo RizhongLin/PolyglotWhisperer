@@ -38,7 +38,9 @@ class WhisperConfig(BaseModel):
 
 
 class LLMConfig(BaseModel):
-    model: str = "ollama_chat/qwen3:8b"
+    backend: str = "local"  # "local" or "api"
+    local_model: str = "ollama_chat/qwen3:8b"
+    api_model: str = "groq/openai/gpt-oss-120b"
     api_base: str = "http://localhost:11434"
     temperature: float = 0.3
     max_tokens: int = 4096
@@ -47,6 +49,11 @@ class LLMConfig(BaseModel):
     cleanup_enabled: bool = False
     translation_enabled: bool = True
     target_language: str = "en"
+
+    @property
+    def model(self) -> str:
+        """Return the model for the active backend."""
+        return self.api_model if self.backend == "api" else self.local_model
 
 
 class DownloadConfig(BaseModel):

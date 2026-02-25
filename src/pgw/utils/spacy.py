@@ -9,6 +9,9 @@ Models are cached per (language, configuration) to avoid redundant loading.
 
 from __future__ import annotations
 
+import subprocess
+import sys
+
 from pgw.utils.console import console
 
 # Mapping from pgw language codes to spaCy model names.
@@ -47,6 +50,14 @@ _cache_pos_only: dict[str, object] = {}
 _cache_with_lemma: dict[str, object] = {}
 
 
+def _install_spacy_model(model_name: str) -> None:
+    """Install a spaCy model via pip in the current environment."""
+    cmd = [sys.executable, "-m", "pip", "install", model_name]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr)
+
+
 def load_spacy_model(language: str, enable_lemmatizer: bool = False):
     """Load a spaCy model, auto-downloading if needed.
 
@@ -80,10 +91,10 @@ def load_spacy_model(language: str, enable_lemmatizer: bool = False):
     try:
         nlp = spacy.load(model_name, disable=disable)
     except OSError:
-        # Model not installed — auto-download
+        # Model not installed — auto-download via uv (preferred) or pip
         console.print(f"[bold]Downloading spaCy model:[/bold] {model_name}")
         try:
-            spacy.cli.download(model_name)
+            _install_spacy_model(model_name)
             nlp = spacy.load(model_name, disable=disable)
         except (SystemExit, Exception):
             console.print(f"[yellow]Could not load spaCy model {model_name}, skipping.[/yellow]")

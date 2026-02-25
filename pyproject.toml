@@ -26,6 +26,7 @@ download = [
 llm = [
     "litellm>=1.40",
     "ollama>=0.4",
+    "tenacity>=8.0",
 ]
 nlp = [
     "spacy>=3.7",

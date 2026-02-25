@@ -29,6 +29,10 @@ def translate(
         Optional[str],
         typer.Option("--llm-model", help="LLM model (e.g. ollama_chat/qwen3:8b)."),
     ] = None,
+    llm_backend: Annotated[
+        Optional[str],
+        typer.Option(help="LLM backend: local or api."),
+    ] = None,
     output: Annotated[
         Optional[Path],
         typer.Option("--output", "-o", help="Output file path."),
@@ -59,7 +63,10 @@ def translate(
 
     overrides = {}
     if llm_model is not None:
-        overrides["llm.model"] = llm_model
+        model_key = "llm.api_model" if llm_backend == "api" else "llm.local_model"
+        overrides[model_key] = llm_model
+    if llm_backend is not None:
+        overrides["llm.backend"] = llm_backend
     overrides["llm.target_language"] = to
 
     config = load_config(**overrides)

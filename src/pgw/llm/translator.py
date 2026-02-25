@@ -18,9 +18,9 @@ from pgw.llm.prompts import (
 )
 from pgw.utils.console import console
 
-CHUNK_SIZE = 15
-OVERLAP = 2  # Context overlap between chunks for coherence
-HISTORY_SIZE = 5  # Number of previous translated pairs to include as context
+CHUNK_SIZE = 48
+OVERLAP = 4  # Context overlap between chunks for coherence
+HISTORY_SIZE = 8  # Number of previous translated pairs to include as context
 
 
 def _process_chunk(
@@ -29,7 +29,7 @@ def _process_chunk(
     target_lang: str,
     config: LLMConfig,
     system_prompt: str,
-    context_prefix: str,
+    context: str,
     _depth: int = 0,
 ) -> list[str]:
     """Process a single translation chunk, retrying with smaller batches on mismatch."""
@@ -46,7 +46,8 @@ def _process_chunk(
                 count=len(texts),
                 source_lang=source_lang,
                 target_lang=target_lang,
-                numbered_segments=context_prefix + numbered,
+                context=context,
+                numbered_segments=numbered,
             ),
         },
     ]
@@ -69,7 +70,7 @@ def _process_chunk(
         target_lang,
         config,
         system_prompt,
-        context_prefix,
+        context,
         _depth=_depth + 1,
     )
     second_half = _process_chunk(
@@ -78,7 +79,7 @@ def _process_chunk(
         target_lang,
         config,
         system_prompt,
-        "",
+        context,
         _depth=_depth + 1,
     )
     return first_half + second_half
@@ -133,28 +134,31 @@ def translate_subtitles(
         for i in range(0, len(segments), chunk_size):
             chunk = segments[i : i + chunk_size]
 
-            # Include overlap context from surrounding segments
-            before = segments[max(0, i - OVERLAP) : i]
-            after = segments[i + chunk_size : i + chunk_size + OVERLAP]
+            # Build reference context (kept outside the numbered segment block)
             context_parts = []
-            if before:
-                context_parts.append("\n".join(f"[preceding context] {seg.text}" for seg in before))
-            if after:
-                context_parts.append("\n".join(f"[following context] {seg.text}" for seg in after))
-            context_prefix = ""
-            if context_parts:
-                context_prefix = (
-                    "For context only (do NOT translate these, "
-                    "they are just for reference):\n" + "\n".join(context_parts) + "\n\n"
-                )
 
-            # Add translation history for style consistency
+            # Translation history for style consistency
             history = format_history_context(
                 recent_source[-HISTORY_SIZE:],
                 recent_translated[-HISTORY_SIZE:],
             )
             if history:
-                context_prefix = history + context_prefix
+                context_parts.append(history)
+
+            # Overlap context from surrounding segments
+            before = segments[max(0, i - OVERLAP) : i]
+            after = segments[i + chunk_size : i + chunk_size + OVERLAP]
+            overlap_parts = []
+            if before:
+                overlap_parts.append("\n".join(f"[preceding] {seg.text}" for seg in before))
+            if after:
+                overlap_parts.append("\n".join(f"[following] {seg.text}" for seg in after))
+            if overlap_parts:
+                context_parts.append(
+                    "Surrounding context (for reference only):\n" + "\n".join(overlap_parts) + "\n"
+                )
+
+            context = "\n".join(context_parts) + "\n" if context_parts else ""
 
             texts = [seg.text for seg in chunk]
 
@@ -170,7 +174,7 @@ def translate_subtitles(
                         target_lang,
                         config,
                         system_prompt,
-                        context_prefix,
+                        context,
                     )
                 except Exception as e:
                     console.print(

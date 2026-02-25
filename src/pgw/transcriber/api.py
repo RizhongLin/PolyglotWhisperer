@@ -7,22 +7,27 @@ dependency required.
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 from pgw.core.config import WhisperConfig
 from pgw.core.models import SubtitleSegment
+from pgw.utils.cache import cache_key, get_cache_dir
 from pgw.utils.console import console
 
-# 25 MB limit for OpenAI/Groq Whisper API
+# 25 MB upload limit for Groq/OpenAI Whisper API
 _MAX_FILE_SIZE = 25 * 1024 * 1024
 
 
-def transcribe(audio_path: Path, config: WhisperConfig) -> list[SubtitleSegment]:
+def transcribe(
+    audio_path: Path, config: WhisperConfig, workspace_dir: Path | None = None
+) -> list[SubtitleSegment]:
     """Transcribe audio via a cloud Whisper API.
 
     Args:
         audio_path: Path to audio file (WAV recommended).
         config: Whisper configuration with model set to a LiteLLM model string.
+        workspace_dir: Base workspace directory for shared cache.
 
     Returns:
         List of subtitle segments with timestamps.
@@ -39,11 +44,7 @@ def transcribe(audio_path: Path, config: WhisperConfig) -> list[SubtitleSegment]
     audio_path = Path(audio_path)
     file_size = audio_path.stat().st_size
     if file_size > _MAX_FILE_SIZE:
-        size_mb = file_size / (1024 * 1024)
-        raise ValueError(
-            f"Audio file is {size_mb:.1f} MB, exceeding the 25 MB API limit. "
-            "Use --start/--duration to clip, or switch to --backend local."
-        )
+        audio_path = _compress_for_api(audio_path, workspace_dir)
 
     console.print(f"[bold]Transcribing via API:[/bold] {config.model}")
 
@@ -66,6 +67,58 @@ def transcribe(audio_path: Path, config: WhisperConfig) -> list[SubtitleSegment]
     segments = _response_to_segments(response)
     console.print(f"[green]Transcription complete:[/green] {len(segments)} segments")
     return segments
+
+
+def _compress_for_api(audio_path: Path, workspace_dir: Path | None = None) -> Path:
+    """Compress audio to MP3 to fit within the API upload limit.
+
+    Uses the shared cache at .cache/compressed/ when workspace_dir is provided.
+    Whisper APIs accept MP3, and the quality loss at 64kbps mono is
+    negligible for speech recognition.
+    """
+    # Check shared cache
+    if workspace_dir is not None:
+        key = cache_key(audio_path, codec="mp3", bitrate="64k")
+        cache_dir = get_cache_dir(workspace_dir, "compressed")
+        cached_path = cache_dir / f"{key}.mp3"
+        if cached_path.is_file():
+            size_mb = cached_path.stat().st_size / (1024 * 1024)
+            console.print(f"[dim]Compressed audio found in cache ({size_mb:.1f} MB).[/dim]")
+            return cached_path
+
+    size_mb = audio_path.stat().st_size / (1024 * 1024)
+    console.print(f"[bold]Compressing audio:[/bold] {size_mb:.1f} MB WAV → MP3 for API upload")
+
+    # Compress to cache if available, otherwise to workspace
+    mp3_path = cached_path if workspace_dir is not None else audio_path.with_suffix(".api.mp3")
+    cmd = [
+        "ffmpeg",
+        "-i",
+        str(audio_path),
+        "-codec:a",
+        "libmp3lame",
+        "-b:a",
+        "64k",
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-y",
+        str(mp3_path),
+    ]
+    result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    if result.returncode != 0:
+        stderr_msg = result.stderr.decode(errors="replace").strip()
+        raise RuntimeError(f"Audio compression failed: {stderr_msg}")
+
+    new_size_mb = mp3_path.stat().st_size / (1024 * 1024)
+    if mp3_path.stat().st_size > _MAX_FILE_SIZE:
+        raise ValueError(
+            f"Compressed audio is still {new_size_mb:.1f} MB, exceeding the 25 MB API limit. "
+            "Use --start/--duration to clip, or switch to --backend local."
+        )
+    console.print(f"[green]Compressed:[/green] {new_size_mb:.1f} MB")
+    return mp3_path
 
 
 def _response_to_segments(response) -> list[SubtitleSegment]:
@@ -104,7 +157,7 @@ def _response_to_segments(response) -> list[SubtitleSegment]:
 
 def _regroup_words(
     words: list[dict],
-    max_chars: int = 50,
+    max_chars: int = 72,
     max_dur: float = 8.0,
 ) -> list[SubtitleSegment]:
     """Regroup word-level timestamps into subtitle-sized segments.

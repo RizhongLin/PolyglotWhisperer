@@ -35,34 +35,34 @@ Return exactly {count} numbered lines, one per input line.
 """
 
 TRANSLATION_SYSTEM = """\
-You are a professional subtitle translator. Translate subtitle segments accurately \
-while keeping them natural and concise for on-screen reading.
+You are a professional subtitle translator. Translate subtitle segments \
+into natural, idiomatic {target_lang} that sounds like it was originally written \
+in {target_lang} — not a word-for-word translation.
 
 Rules:
-- Translate each numbered line from {source_lang} to {target_lang}
+- Translate ONLY the numbered lines between the ===BEGIN=== and ===END=== markers
+- Return exactly the same number of numbered lines as the input
+- Restructure sentences to follow {target_lang} grammar and word order naturally
+- Use natural connectives and phrasing in {target_lang}, not calques from {source_lang}
+- Consecutive lines are part of the same speech — ensure coherence across lines \
+(e.g. if a sentence spans two lines, the translations should read naturally together)
+- Keep proper nouns (names, places, brands) in their original form
 - Keep translations concise — suitable for subtitle display
-- Preserve the tone and register of the original
-- Handle idioms and colloquialisms naturally in the target language
-- Do NOT merge or split segments — return the EXACT same number of lines
-- Return ONLY the translated lines, numbered exactly as the input
+- Do NOT merge or split segments
+- Do NOT include any extra text, explanations, or commentary
 
-Examples (fr → en):
-Input:
-1. Bonjour, comment allez-vous ?
-2. Je suis très content de vous voir.
-3. Il fait un temps magnifique aujourd'hui.
-
-Output:
-1. Hello, how are you?
-2. I'm very happy to see you.
-3. The weather is wonderful today.
+Output format — return ONLY numbered translations like:
+1. translated text
+2. translated text
 """
 
 TRANSLATION_USER = """\
-Translate these {count} subtitle segments from {source_lang} to {target_lang}. \
-Return exactly {count} numbered lines, one per input line.
+Translate these {count} lines from {source_lang} to {target_lang}. \
+Return exactly {count} numbered lines.
 
+{context}===BEGIN===
 {numbered_segments}
+===END===
 """
 
 
@@ -95,11 +95,8 @@ def format_history_context(
 def parse_numbered_response(response: str, expected_count: int) -> tuple[list[str], bool]:
     """Parse a numbered LLM response back into a list of texts.
 
-    Handles various formats:
-    - "1. Text here"
-    - "1) Text here"
-    - "1: Text here"
-    - Plain lines (fallback)
+    Only extracts lines with explicit numbering (1. / 1) / 1:).
+    Non-numbered lines (explanations, context echoes) are ignored.
 
     Returns:
         Tuple of (parsed texts, exact_match) where exact_match is True
@@ -109,15 +106,13 @@ def parse_numbered_response(response: str, expected_count: int) -> tuple[list[st
 
     parsed = []
     for line in lines:
-        # Try stripping common numbering patterns
+        # Only accept lines with explicit numbering
         for sep in [". ", ") ", ": "]:
             parts = line.split(sep, 1)
             if len(parts) == 2 and parts[0].strip().isdigit():
                 parsed.append(parts[1].strip())
                 break
-        else:
-            # No numbering found, use the line as-is
-            parsed.append(line)
+        # Skip non-numbered lines entirely
 
     exact_match = len(parsed) == expected_count
 

@@ -31,10 +31,19 @@ def test_parse_blank_lines_ignored():
     assert exact is True
 
 
-def test_parse_no_numbering_fallback():
+def test_parse_no_numbering_ignored():
+    """Non-numbered lines are ignored to avoid counting context/explanations."""
     response = "Just plain text\nAnother line"
     result, exact = parse_numbered_response(response, 2)
-    assert result == ["Just plain text", "Another line"]
+    assert result == ["", ""]
+    assert exact is False
+
+
+def test_parse_mixed_numbered_and_plain():
+    """Only numbered lines are extracted, plain text is ignored."""
+    response = "Here are the translations:\n1. Hello\n2. World\nHope this helps!"
+    result, exact = parse_numbered_response(response, 2)
+    assert result == ["Hello", "World"]
     assert exact is True
 
 

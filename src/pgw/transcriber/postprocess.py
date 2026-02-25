@@ -22,7 +22,7 @@ _DANGLING_POS = {"DET", "ADP"}
 _APOSTROPHES = {"'", "\u2019"}
 
 
-def regroup_for_subtitles(result, max_chars: int = 50) -> None:
+def regroup_for_subtitles(result, max_chars: int = 72) -> None:
     """Rebuild segments from word-level timestamps for subtitle display.
 
     Merges all segments, then re-splits using punctuation, speech gaps,

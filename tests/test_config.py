@@ -27,6 +27,15 @@ def test_model_property_selects_backend():
     assert api.whisper.model == api.whisper.api_model
 
 
+def test_llm_model_property_selects_backend():
+    """LLM model property returns api_model when backend is api."""
+    local = load_config(**{"llm.backend": "local"})
+    assert local.llm.model == local.llm.local_model
+
+    api = load_config(**{"llm.backend": "api"})
+    assert api.llm.model == api.llm.api_model
+
+
 def test_deep_merge():
     base = {"a": {"b": 1, "c": 2}, "d": 3}
     override = {"a": {"b": 10, "e": 5}, "f": 6}

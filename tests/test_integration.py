@@ -15,7 +15,7 @@ from pgw.core.models import SubtitleSegment
 pytestmark = pytest.mark.integration
 
 TEST_MODEL = "qwen3:0.6b"
-TEST_CONFIG = LLMConfig(model=f"ollama_chat/{TEST_MODEL}")
+TEST_CONFIG = LLMConfig(local_model=f"ollama_chat/{TEST_MODEL}")
 
 
 def ollama_available() -> bool:

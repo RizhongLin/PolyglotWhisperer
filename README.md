@@ -25,13 +25,22 @@ Video transcription and translation CLI for language learners. Transcribe with W
 ```bash
 # macOS
 brew install uv ffmpeg mpv
+brew install pango           # required for PDF export (WeasyPrint)
 brew install --cask ollama   # optional
 
 # Ubuntu/Debian
-sudo apt install ffmpeg mpv
+sudo apt install ffmpeg mpv libpango-1.0-0 libpangoft2-1.0-0
 curl -fsSL https://astral.sh/uv/install.sh | sh
 curl -fsSL https://ollama.com/install.sh | sh   # optional
 ```
+
+> **macOS PDF export:** If PDF export fails with `cannot load library 'libgobject-2.0-0'`, add this to your `~/.zshrc`:
+>
+> ```bash
+> export DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib
+> ```
+>
+> This lets the uv-managed Python find Homebrew's native libraries.
 
 ### Installation
 
@@ -75,8 +84,8 @@ export OPENAI_API_KEY=sk-...
 # Full pipeline: download → transcribe → translate → play
 pgw run "https://example.com/video" --translate en --no-play
 
-# Cloud API transcription (no local GPU needed)
-pgw run "https://example.com/video" --backend api --translate en --no-play
+# Cloud API transcription + translation (no local GPU needed)
+pgw run "https://example.com/video" --backend api --llm-backend api --translate en --no-play
 
 # Batch processing
 pgw run *.mp4 --translate en --no-play
@@ -109,18 +118,22 @@ api_model = "groq/whisper-large-v3-turbo"
 language = "fr"
 
 [llm]
-model = "ollama_chat/qwen3:8b"
+backend = "api"                            # "local" or "api"
+local_model = "ollama_chat/qwen3:8b"      # for local backend
+api_model = "groq/openai/gpt-oss-120b" # for api backend
 target_language = "en"
 ```
 
-Environment variables use `PGW_` prefix: `PGW_WHISPER__BACKEND=api`, `PGW_LLM__MODEL=groq/llama-3.3-70b-versatile`.
+Environment variables use `PGW_` prefix: `PGW_WHISPER__BACKEND=api`, `PGW_LLM__BACKEND=api`, `PGW_LLM__API_MODEL=groq/openai/gpt-oss-120b`.
 
 ### Workspace Output
 
 ```plaintext
 pgw_workspace/
-├── .cache/                           # Shared media cache
-│   ├── audio/                        # Extracted audio (cross-workspace)
+├── .cache/                           # Shared cache (cross-workspace)
+│   ├── audio/                        # Extracted audio
+│   ├── compressed/                   # API-compressed MP3s
+│   ├── transcriptions/               # Whisper results (local + API)
 │   └── downloads/                    # yt-dlp downloads
 └── my-video/
     └── 20260217_164802/
@@ -132,25 +145,25 @@ pgw_workspace/
         ├── bilingual.fr-en.vtt       # Dual-language VTT
         ├── parallel.fr-en.pdf        # Side-by-side PDF
         ├── vocabulary.fr.json        # CEFR analysis + rare words
-        ├── transcription.json        # Full Whisper result (local only)
+        ├── transcription.json        # Full Whisper result (local backend)
         └── metadata.json
 ```
 
 ## Transcription Backends
 
-| Backend             | Technology                                        | Pros                                                   | Limits                             |
-| ------------------- | ------------------------------------------------- | ------------------------------------------------------ | ---------------------------------- |
-| **Local** (default) | [stable-ts](https://github.com/jianfch/stable-ts) | Best quality, word-level timestamps, custom regrouping | Requires GPU / model downloads     |
-| **Cloud API**       | [LiteLLM](https://github.com/BerriAI/litellm)     | Fast, cheap, no GPU                                    | 25 MB file limit, API key required |
+| Backend             | Technology                                        | Pros                                                   | Limits                         |
+| ------------------- | ------------------------------------------------- | ------------------------------------------------------ | ------------------------------ |
+| **Local** (default) | [stable-ts](https://github.com/jianfch/stable-ts) | Best quality, word-level timestamps, custom regrouping | Requires GPU / model downloads |
+| **Cloud API**       | [LiteLLM](https://github.com/BerriAI/litellm)     | Fast, cheap, no GPU, auto-compresses large files       | API key required               |
 
 ```bash
 # Local
-pgw transcribe audio.wav -l fr                     # large-v3-turbo on MLX
-pgw transcribe audio.wav -l fr --model medium       # smaller model
+pgw transcribe audio.wav -l fr                              # large-v3-turbo on MLX
+pgw transcribe audio.wav -l fr --whisper-model medium        # smaller model
 
 # Cloud API
-pgw transcribe audio.wav --backend api -l fr                          # Groq (default)
-pgw transcribe audio.wav --backend api --model openai/whisper-1 -l fr  # OpenAI
+pgw transcribe audio.wav --backend api -l fr                                     # Groq (default)
+pgw transcribe audio.wav --backend api --whisper-model openai/whisper-1 -l fr     # OpenAI
 ```
 
 ## Vocabulary Analysis

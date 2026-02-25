@@ -60,6 +60,10 @@ def transcribe(
         Optional[str],
         typer.Option("--llm-model", help="LLM model for cleanup (e.g. ollama_chat/qwen3:8b)."),
     ] = None,
+    llm_backend: Annotated[
+        Optional[str],
+        typer.Option(help="LLM backend: local or api."),
+    ] = None,
     backend: Annotated[
         Optional[str],
         typer.Option(help="Transcription backend: local or api."),
@@ -86,7 +90,10 @@ def transcribe(
         model_key = "whisper.api_model" if backend == "api" else "whisper.local_model"
         overrides[model_key] = whisper_model
     if llm_model is not None:
-        overrides["llm.model"] = llm_model
+        model_key = "llm.api_model" if llm_backend == "api" else "llm.local_model"
+        overrides[model_key] = llm_model
+    if llm_backend is not None:
+        overrides["llm.backend"] = llm_backend
     if backend is not None:
         overrides["whisper.backend"] = backend
     config = load_config(**overrides)
@@ -199,7 +206,7 @@ def _transcribe_single(
         from pgw.transcriber.api import transcribe as api_transcribe
         from pgw.transcriber.postprocess import fix_dangling_clitics
 
-        segments = api_transcribe(audio_path, config.whisper)
+        segments = api_transcribe(audio_path, config.whisper, config.workspace_dir)
         segments = fix_dangling_clitics(segments, language)
 
         if cleanup:
