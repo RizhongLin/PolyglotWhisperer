@@ -1,6 +1,12 @@
 """Tests for LLM prompt parsing edge cases."""
 
-from pgw.llm.prompts import format_history_context, parse_numbered_response
+from pgw.llm.prompts import (
+    UNTRANSLATED_MARKER,
+    format_bilingual_context,
+    format_history_context,
+    parse_json_response,
+    parse_numbered_response,
+)
 
 
 def test_parse_extra_lines_truncated():
@@ -56,3 +62,69 @@ def test_format_history_context_pairs():
     assert "Bonjour" in result
     assert "Hello" in result
     assert "Previous translations" in result
+
+
+# --- JSON response parser tests ---
+
+
+def test_parse_json_response_translations_object():
+    response = '{"translations": ["Hello", "World"]}'
+    result, exact = parse_json_response(response, 2)
+    assert result == ["Hello", "World"]
+    assert exact is True
+
+
+def test_parse_json_response_with_code_fences():
+    response = '```json\n{"translations": ["Hello", "World"]}\n```'
+    result, exact = parse_json_response(response, 2)
+    assert result == ["Hello", "World"]
+    assert exact is True
+
+
+def test_parse_json_response_plain_array_rejected():
+    """Plain arrays are not accepted — must be wrapped in an object."""
+    response = '["Hello", "World"]'
+    result, exact = parse_json_response(response, 2)
+    assert result == []
+    assert exact is False
+
+
+def test_parse_json_response_invalid_json():
+    response = "Not JSON at all"
+    result, exact = parse_json_response(response, 2)
+    assert result == []
+    assert exact is False
+
+
+def test_parse_json_response_not_array_or_translations():
+    response = '{"key": "value"}'
+    result, exact = parse_json_response(response, 2)
+    assert result == []
+    assert exact is False
+
+
+def test_parse_json_response_count_mismatch():
+    response = '{"translations": ["A", "B", "C"]}'
+    result, exact = parse_json_response(response, 2)
+    assert result == ["A", "B"]
+    assert exact is False
+
+
+# --- Bilingual context formatter tests ---
+
+
+def test_format_bilingual_context_empty():
+    assert format_bilingual_context([], []) == ""
+
+
+def test_format_bilingual_context_pairs():
+    result = format_bilingual_context(["Bonjour", "Merci"], ["Hello", "Thanks"])
+    assert "[preceding] Bonjour -> Hello" in result
+    assert "[preceding] Merci -> Thanks" in result
+
+
+# --- Untranslated marker constant ---
+
+
+def test_untranslated_marker_constant():
+    assert UNTRANSLATED_MARKER.startswith("[?]")

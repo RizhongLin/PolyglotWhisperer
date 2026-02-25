@@ -1,17 +1,19 @@
-"""Tests for API transcription regrouping and response parsing."""
+"""Tests for API transcription regrouping, response parsing, and postprocessing."""
 
-from pgw.transcriber.api import _regroup_words, _response_to_segments
+from pgw.core.models import SubtitleSegment
+from pgw.transcriber.api import regroup_words, response_to_segments
+from pgw.transcriber.postprocess import fix_overlapping_timestamps
 
 
 class TestRegroupWords:
-    """Test _regroup_words (all 5 phases)."""
+    """Test regroup_words (all 5 phases)."""
 
     def test_empty_input(self):
-        assert _regroup_words([]) == []
+        assert regroup_words([]) == []
 
     def test_single_word(self):
         words = [{"word": "Hello", "start": 0.0, "end": 0.5}]
-        segments = _regroup_words(words)
+        segments = regroup_words(words)
         assert len(segments) == 1
         assert segments[0].text == "Hello"
         assert segments[0].start == 0.0
@@ -30,7 +32,7 @@ class TestRegroupWords:
             {"word": "five", "start": 0.9, "end": 1.1},
             {"word": "six", "start": 1.1, "end": 1.3},
         ]
-        segments = _regroup_words(words)
+        segments = regroup_words(words)
         assert len(segments) == 2
         assert segments[0].text == "One two three."
         assert segments[1].text == "Four five six"
@@ -44,7 +46,7 @@ class TestRegroupWords:
             {"word": "five", "start": 0.9, "end": 1.1},
             {"word": "six", "start": 1.1, "end": 1.3},
         ]
-        segments = _regroup_words(words)
+        segments = regroup_words(words)
         assert len(segments) == 2
 
     def test_phase2_speech_gap_split(self):
@@ -53,7 +55,7 @@ class TestRegroupWords:
             {"word": "Hello", "start": 0.0, "end": 0.5},
             {"word": "world", "start": 1.5, "end": 2.0},  # 1.0s gap
         ]
-        segments = _regroup_words(words)
+        segments = regroup_words(words)
         assert len(segments) == 2
         assert segments[0].text == "Hello"
         assert segments[1].text == "world"
@@ -65,13 +67,15 @@ class TestRegroupWords:
             {"word": "two", "start": 0.2, "end": 0.4},
             {"word": "three", "start": 0.4, "end": 0.6},
             {"word": "four,", "start": 0.6, "end": 0.8},
+            # Enough trailing words so the fragment isn't merged back
             {"word": "five", "start": 0.8, "end": 1.0},
+            {"word": "six", "start": 1.0, "end": 1.2},
+            {"word": "seven", "start": 1.2, "end": 1.4},
         ]
-        segments = _regroup_words(words)
+        segments = regroup_words(words)
         texts = [seg.text for seg in segments]
-        # "four," ends with comma and has 4 words before it, so should split
+        # "four," ends with comma and has 4 words, so should split
         assert "One two three four," in texts
-        assert "five" in texts
 
     def test_phase4_max_chars_split(self):
         """Segments exceeding max_chars should be split."""
@@ -79,7 +83,7 @@ class TestRegroupWords:
             {"word": "a" * 30, "start": 0.0, "end": 0.5},
             {"word": "b" * 30, "start": 0.5, "end": 1.0},
         ]
-        segments = _regroup_words(words, max_chars=50)
+        segments = regroup_words(words, max_chars=50)
         assert len(segments) == 2
 
     def test_phase4_max_duration_split(self):
@@ -93,7 +97,7 @@ class TestRegroupWords:
             {"word": "six", "start": 7.0, "end": 8.0},
             {"word": "seven", "start": 8.0, "end": 9.0},
         ]
-        segments = _regroup_words(words, max_dur=5.0)
+        segments = regroup_words(words, max_dur=5.0)
         assert len(segments) >= 2
 
     def test_phase5_merge_short_fragments(self):
@@ -102,11 +106,62 @@ class TestRegroupWords:
             {"word": "Hi.", "start": 0.0, "end": 0.3},
             {"word": "OK", "start": 0.35, "end": 0.5},  # 0.05s gap, short
         ]
-        segments = _regroup_words(words)
+        segments = regroup_words(words)
         # "Hi." triggers sentence split, but "OK" is < 3 words with < 0.15s gap
         # Should merge back
         assert len(segments) == 1
         assert segments[0].text == "Hi. OK"
+
+    def test_phase5a_merge_trailing_fragment_backward(self):
+        """Short trailing fragments should merge into previous segment."""
+        # Simulates: "les entreprises dans" + "le flou." — the trailing 2 words
+        # should merge back because previous doesn't end with sentence punctuation.
+        words = [
+            {"word": "les", "start": 0.0, "end": 0.1},
+            {"word": "entreprises", "start": 0.1, "end": 0.3},
+            {"word": "dans", "start": 0.3, "end": 0.4},
+        ]
+        # Force max_chars split by using a very small limit, then re-merge
+        # Instead, create words that would naturally split then merge:
+        words = []
+        # Long segment (fills max_chars)
+        for i, w in enumerate(["One", "two", "three", "four", "five", "six"]):
+            words.append({"word": w, "start": i * 0.2, "end": (i + 1) * 0.2})
+        # Short trailing fragment (continuous, no sentence punctuation before it)
+        words.append({"word": "seven.", "start": 1.2, "end": 1.4})
+        segments = regroup_words(words, max_chars=35)
+        # "One two three four five six" = 26 chars, + " seven." = 34 chars <= 35
+        # Should merge the trailing "seven." into previous segment
+        texts = [seg.text for seg in segments]
+        assert any("seven." in t and "six" in t for t in texts)
+
+    def test_phase5a_no_merge_after_sentence_end(self):
+        """Don't merge trailing fragment if previous ends with sentence punct."""
+        # Use long enough segments so they don't get merged by Phase 5b
+        words = [
+            {"word": "One", "start": 0.0, "end": 0.1},
+            {"word": "two", "start": 0.1, "end": 0.2},
+            {"word": "three.", "start": 0.2, "end": 0.4},
+            # Gap separates the sentence-ending segment from the trailing fragment
+            {"word": "Four", "start": 1.0, "end": 1.1},
+            {"word": "five.", "start": 1.1, "end": 1.3},
+        ]
+        segments = regroup_words(words)
+        # "three." ends with sentence punct, "Four five." shouldn't merge back
+        assert len(segments) == 2
+        assert segments[0].text == "One two three."
+        assert segments[1].text == "Four five."
+
+    def test_phase6_overlapping_timestamps_clamped(self):
+        """Adjacent segments with overlapping timestamps get clamped."""
+        words = [
+            {"word": "Hello", "start": 0.0, "end": 1.0},
+            {"word": "world.", "start": 0.8, "end": 1.5},  # overlaps with previous
+            {"word": "Goodbye", "start": 1.3, "end": 2.0},  # overlaps with previous
+        ]
+        segments = regroup_words(words)
+        for i in range(1, len(segments)):
+            assert segments[i].start >= segments[i - 1].end
 
     def test_whitespace_only_words_skipped(self):
         words = [
@@ -114,7 +169,7 @@ class TestRegroupWords:
             {"word": "  ", "start": 0.5, "end": 0.6},
             {"word": "world", "start": 0.6, "end": 1.0},
         ]
-        segments = _regroup_words(words)
+        segments = regroup_words(words)
         combined_text = " ".join(seg.text for seg in segments)
         assert "  " not in combined_text
 
@@ -125,13 +180,13 @@ class TestRegroupWords:
             {"word": "am", "start": 0.1, "end": 0.2},
             {"word": "fine", "start": 0.2, "end": 0.4},
         ]
-        segments = _regroup_words(words)
+        segments = regroup_words(words)
         assert len(segments) == 1
         assert segments[0].text == "I am fine"
 
 
 class TestResponseToSegments:
-    """Test _response_to_segments with 3 fallback tiers."""
+    """Test response_to_segments with 3 fallback tiers."""
 
     def test_word_level_timestamps(self):
         """Tier 1: word-level timestamps → regrouped segments."""
@@ -143,7 +198,7 @@ class TestResponseToSegments:
                 ],
             }
         )
-        segments = _response_to_segments(response)
+        segments = response_to_segments(response)
         assert len(segments) >= 1
         assert "Hello" in segments[0].text
 
@@ -158,7 +213,7 @@ class TestResponseToSegments:
                 ],
             }
         )
-        segments = _response_to_segments(response)
+        segments = response_to_segments(response)
         assert len(segments) == 2
         assert segments[0].text == "Hello world"
         assert segments[1].start == 1.0
@@ -170,13 +225,13 @@ class TestResponseToSegments:
                 "text": "Hello world",
             }
         )
-        segments = _response_to_segments(response)
+        segments = response_to_segments(response)
         assert len(segments) == 1
         assert segments[0].text == "Hello world"
 
     def test_empty_response(self):
         response = _MockResponse({"text": ""})
-        segments = _response_to_segments(response)
+        segments = response_to_segments(response)
         assert segments == []
 
     def test_empty_segments_filtered(self):
@@ -189,9 +244,49 @@ class TestResponseToSegments:
                 ],
             }
         )
-        segments = _response_to_segments(response)
+        segments = response_to_segments(response)
         assert len(segments) == 1
         assert segments[0].text == "Hello"
+
+
+class TestFixOverlappingTimestamps:
+    """Test fix_overlapping_timestamps on SubtitleSegments."""
+
+    def test_no_overlap(self):
+        segments = [
+            SubtitleSegment(text="A", start=0.0, end=1.0),
+            SubtitleSegment(text="B", start=1.0, end=2.0),
+        ]
+        result = fix_overlapping_timestamps(segments)
+        assert result[0].start == 0.0
+        assert result[1].start == 1.0
+
+    def test_overlap_snapped(self):
+        segments = [
+            SubtitleSegment(text="A", start=0.0, end=1.5),
+            SubtitleSegment(text="B", start=1.2, end=2.0),  # 300ms overlap
+        ]
+        result = fix_overlapping_timestamps(segments)
+        assert result[1].start == 1.5  # snapped to previous end
+        assert result[1].end == 2.0
+
+    def test_multiple_overlaps(self):
+        segments = [
+            SubtitleSegment(text="A", start=0.0, end=1.0),
+            SubtitleSegment(text="B", start=0.9, end=2.0),
+            SubtitleSegment(text="C", start=1.8, end=3.0),
+        ]
+        result = fix_overlapping_timestamps(segments)
+        for i in range(1, len(result)):
+            assert result[i].start >= result[i - 1].end
+
+    def test_single_segment(self):
+        segments = [SubtitleSegment(text="A", start=0.0, end=1.0)]
+        result = fix_overlapping_timestamps(segments)
+        assert len(result) == 1
+
+    def test_empty_list(self):
+        assert fix_overlapping_timestamps([]) == []
 
 
 class _MockResponse:

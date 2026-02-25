@@ -16,7 +16,17 @@ def _format_timestamp(seconds: float) -> str:
     return f"{m:02d}:{s:02d}"
 
 
-def _build_parallel_html(
+def _build_table_row(orig: SubtitleSegment, trans: SubtitleSegment) -> str:
+    """Build a single HTML table row for a parallel segment pair."""
+    ts = _format_timestamp(orig.start)
+    return (
+        f'<tr><td class="ts">{ts}</td>'
+        f'<td class="orig">{html.escape(orig.text)}</td>'
+        f'<td class="trans">{html.escape(trans.text)}</td></tr>'
+    )
+
+
+def build_parallel_html(
     original: list[SubtitleSegment],
     translated: list[SubtitleSegment],
     source_lang: str,
@@ -24,18 +34,9 @@ def _build_parallel_html(
     title: str,
 ) -> str:
     """Build HTML for parallel text layout."""
-    rows = []
-    for orig, trans in zip(original, translated, strict=True):
-        ts = _format_timestamp(orig.start)
-        orig_text = html.escape(orig.text)
-        trans_text = html.escape(trans.text)
-        rows.append(
-            f'<tr><td class="ts">{ts}</td>'
-            f'<td class="orig">{orig_text}</td>'
-            f'<td class="trans">{trans_text}</td></tr>'
-        )
-
-    table_rows = "\n".join(rows)
+    table_rows = "\n".join(
+        _build_table_row(orig, trans) for orig, trans in zip(original, translated, strict=True)
+    )
     return f"""\
 <!DOCTYPE html>
 <html lang="{source_lang}">
@@ -107,7 +108,7 @@ def export_parallel_pdf(
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     title = title or f"Parallel Text ({source_lang}-{target_lang})"
-    html_content = _build_parallel_html(original, translated, source_lang, target_lang, title)
+    html_content = build_parallel_html(original, translated, source_lang, target_lang, title)
     HTML(string=html_content).write_pdf(str(output_path))
 
     return output_path
@@ -178,14 +179,9 @@ td { padding: 4px 8px; vertical-align: top; border-bottom: 1px solid #eee; }
         end_ts = _format_timestamp(ch_orig[-1].end)
         ch_title = f"{start_ts} — {end_ts}"
 
-        rows = []
-        for orig, trans in zip(ch_orig, ch_trans, strict=True):
-            ts = _format_timestamp(orig.start)
-            rows.append(
-                f'<tr><td class="ts">{ts}</td>'
-                f'<td class="orig">{html.escape(orig.text)}</td>'
-                f'<td class="trans">{html.escape(trans.text)}</td></tr>'
-            )
+        rows = [
+            _build_table_row(orig, trans) for orig, trans in zip(ch_orig, ch_trans, strict=True)
+        ]
 
         chapter = epub.EpubHtml(
             title=ch_title,

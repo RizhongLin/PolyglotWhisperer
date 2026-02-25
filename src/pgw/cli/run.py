@@ -5,9 +5,8 @@ from __future__ import annotations
 from typing import Annotated, Optional
 
 import typer
-from rich.table import Table
 
-from pgw.cli.utils import expand_inputs
+from pgw.cli.utils import build_config_overrides, expand_inputs, print_batch_summary
 from pgw.core.config import load_config
 
 
@@ -68,43 +67,35 @@ def run(
     """
     from pgw.core.languages import validate_language
     from pgw.core.pipeline import run_pipeline
-    from pgw.utils.console import console as _console
+    from pgw.utils.console import console
 
     try:
         validate_language(language)
     except ValueError as e:
-        _console.print(f"[red]{e}[/red]")
+        console.print(f"[red]{e}[/red]")
         raise typer.Exit(1)
 
     if translate is not None:
         try:
             validate_language(translate)
         except ValueError as e:
-            _console.print(f"[red]{e}[/red]")
+            console.print(f"[red]{e}[/red]")
             raise typer.Exit(1)
 
-    overrides: dict[str, object] = {
-        "whisper.language": language,
-        "whisper.device": device,
-    }
-    if whisper_model is not None:
-        model_key = "whisper.api_model" if backend == "api" else "whisper.local_model"
-        overrides[model_key] = whisper_model
-    if llm_model is not None:
-        model_key = "llm.api_model" if llm_backend == "api" else "llm.local_model"
-        overrides[model_key] = llm_model
-    if llm_backend is not None:
-        overrides["llm.backend"] = llm_backend
-    if backend is not None:
-        overrides["whisper.backend"] = backend
-    if translate is not None:
-        overrides["llm.target_language"] = translate
-
+    overrides = build_config_overrides(
+        language=language,
+        device=device,
+        whisper_model=whisper_model,
+        llm_model=llm_model,
+        llm_backend=llm_backend,
+        backend=backend,
+        translate=translate,
+    )
     config = load_config(**overrides)
 
     expanded = expand_inputs(inputs)
     if not expanded:
-        _console.print("[red]No inputs resolved. Check your paths or patterns.[/red]")
+        console.print("[red]No inputs resolved. Check your paths or patterns.[/red]")
         raise typer.Exit(1)
 
     # Single input — original behavior
@@ -122,10 +113,10 @@ def run(
 
     # Batch mode — process each, collect results
     results: list[tuple[str, str, str]] = []  # (input, status, workspace)
-    _console.print(f"[bold]Batch processing {len(expanded)} inputs...[/bold]\n")
+    console.print(f"[bold]Batch processing {len(expanded)} inputs...[/bold]\n")
 
     for i, input_path in enumerate(expanded, 1):
-        _console.rule(f"[bold][{i}/{len(expanded)}] {input_path}[/bold]")
+        console.rule(f"[bold][{i}/{len(expanded)}] {input_path}[/bold]")
         try:
             workspace = run_pipeline(
                 input_path=input_path,
@@ -138,23 +129,9 @@ def run(
             )
             results.append((input_path, "success", str(workspace)))
         except Exception as e:
-            _console.print(f"[red]Failed:[/red] {e}")
+            console.print(f"[red]Failed:[/red] {e}")
             results.append((input_path, "failed", str(e)))
 
     # Summary table
-    _console.print()
-    table = Table(title=f"Batch Results ({len(expanded)} files)")
-    table.add_column("#", justify="right", style="dim")
-    table.add_column("Input", max_width=50, no_wrap=True)
-    table.add_column("Status")
-    table.add_column("Output", max_width=50, no_wrap=True)
-
-    succeeded = 0
-    for i, (inp, status, output) in enumerate(results, 1):
-        style = "green" if status == "success" else "red"
-        table.add_row(str(i), inp, f"[{style}]{status}[/{style}]", output)
-        if status == "success":
-            succeeded += 1
-
-    _console.print(table)
-    _console.print(f"\n[bold]{succeeded}/{len(expanded)} succeeded[/bold]")
+    console.print()
+    print_batch_summary(results, total=len(expanded), show_output=True)

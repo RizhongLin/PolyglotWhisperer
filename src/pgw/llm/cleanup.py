@@ -4,21 +4,22 @@ from __future__ import annotations
 
 from typing import Callable
 
-from rich.progress import Progress, SpinnerColumn, TextColumn
-
 from pgw.core.config import LLMConfig
 from pgw.core.models import SubtitleSegment
 from pgw.llm.client import complete
 from pgw.llm.prompts import (
     CLEANUP_SYSTEM,
     CLEANUP_USER,
+    filter_empty_segments,
     format_numbered_segments,
     parse_numbered_response,
+    reconstruct_with_empties,
 )
-from pgw.utils.console import console
+from pgw.utils.console import chunk_progress, console
 
 CHUNK_SIZE = 20
 OVERLAP = 2  # Context overlap between chunks for coherence
+MAX_RETRY_DEPTH = 3  # Max recursion for binary-split retries
 
 
 def _process_chunk(
@@ -29,7 +30,7 @@ def _process_chunk(
     _depth: int = 0,
 ) -> list[str]:
     """Process a single chunk, retrying with smaller batches on count mismatch."""
-    if _depth >= 3:
+    if _depth >= MAX_RETRY_DEPTH:
         return texts  # Best-effort: return originals to avoid infinite recursion
 
     numbered = format_numbered_segments(texts)
@@ -88,12 +89,7 @@ def cleanup_subtitles(
     cleaned = []
     total_chunks = (len(segments) + chunk_size - 1) // chunk_size
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[bold blue]{task.description}"),
-        TextColumn("{task.completed}/{task.total} chunks"),
-        console=console,
-    ) as progress:
+    with chunk_progress() as progress:
         task = progress.add_task("Cleaning subtitles", total=total_chunks)
 
         for i in range(0, len(segments), chunk_size):
@@ -120,8 +116,7 @@ def cleanup_subtitles(
                 )
 
             # Skip empty segments — don't send to LLM
-            non_empty_idx = [j for j, t in enumerate(texts) if t.strip()]
-            non_empty_texts = [texts[j] for j in non_empty_idx]
+            non_empty_idx, non_empty_texts = filter_empty_segments(texts)
 
             if non_empty_texts:
                 try:
@@ -140,9 +135,7 @@ def cleanup_subtitles(
                 result_texts = []
 
             # Reconstruct full list with empties preserved
-            cleaned_texts = [""] * len(texts)
-            for j, idx in enumerate(non_empty_idx):
-                cleaned_texts[idx] = result_texts[j] if j < len(result_texts) else texts[idx]
+            cleaned_texts = reconstruct_with_empties(texts, non_empty_idx, result_texts)
 
             for seg, new_text in zip(chunk, cleaned_texts):
                 # Fall back to original if LLM returned empty

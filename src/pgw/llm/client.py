@@ -72,10 +72,12 @@ def complete(
         The assistant's response text.
     """
     try:
+        import litellm
         from litellm import completion
     except ImportError:
         raise ImportError("LiteLLM is not installed. Install with: uv sync --extra llm")
 
+    litellm.drop_params = True  # silently drop unsupported params per provider
     ensure_ollama_model(config.model)
 
     # Only pass api_base for Ollama models — other providers use their own endpoints

@@ -22,8 +22,20 @@ _USER_CONFIG = Path.home() / ".config" / "pgw" / "config.toml"
 _PROJECT_CONFIG = Path("pgw.toml")
 
 
-class WhisperConfig(BaseModel):
+class BackendConfig(BaseModel):
+    """Base for configs with local/api backend selection."""
+
     backend: str = "local"  # "local" or "api"
+    local_model: str = ""
+    api_model: str = ""
+
+    @property
+    def model(self) -> str:
+        """Return the model for the active backend."""
+        return self.api_model if self.backend == "api" else self.local_model
+
+
+class WhisperConfig(BackendConfig):
     local_model: str = "large-v3-turbo"
     api_model: str = "groq/whisper-large-v3-turbo"
     api_base: str | None = None  # Custom API endpoint (e.g. self-hosted Whisper)
@@ -31,29 +43,18 @@ class WhisperConfig(BaseModel):
     device: str = "auto"
     word_timestamps: bool = True
 
-    @property
-    def model(self) -> str:
-        """Return the model for the active backend."""
-        return self.api_model if self.backend == "api" else self.local_model
 
-
-class LLMConfig(BaseModel):
-    backend: str = "local"  # "local" or "api"
+class LLMConfig(BackendConfig):
     local_model: str = "ollama_chat/qwen3:8b"
     api_model: str = "groq/openai/gpt-oss-120b"
     api_base: str = "http://localhost:11434"
     temperature: float = 0.3
-    max_tokens: int = 4096
-    timeout: int = 120
+    max_tokens: int = 16384
+    timeout: int = 300
     num_retries: int = 2
     cleanup_enabled: bool = False
     translation_enabled: bool = True
     target_language: str = "en"
-
-    @property
-    def model(self) -> str:
-        """Return the model for the active backend."""
-        return self.api_model if self.backend == "api" else self.local_model
 
 
 class DownloadConfig(BaseModel):
@@ -91,12 +92,12 @@ def _load_toml(path: Path) -> dict:
     return {}
 
 
-def _deep_merge(base: dict, override: dict) -> dict:
+def deep_merge(base: dict, override: dict) -> dict:
     """Recursively merge override into base."""
     merged = base.copy()
     for key, value in override.items():
         if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
-            merged[key] = _deep_merge(merged[key], value)
+            merged[key] = deep_merge(merged[key], value)
         else:
             merged[key] = value
     return merged
@@ -113,12 +114,12 @@ def load_config(**cli_overrides: object) -> PGWConfig:
     config_data: dict = tomllib.loads(_DEFAULT_CONFIG_TEXT)
     for path in (_USER_CONFIG, _PROJECT_CONFIG):
         layer = _load_toml(path)
-        config_data = _deep_merge(config_data, layer)
+        config_data = deep_merge(config_data, layer)
 
     # Flatten 'general' section into top-level
     if "general" in config_data:
         general = config_data.pop("general")
-        config_data = _deep_merge(config_data, general)
+        config_data = deep_merge(config_data, general)
 
     # Apply CLI overrides (dot-separated keys)
     for key, value in cli_overrides.items():

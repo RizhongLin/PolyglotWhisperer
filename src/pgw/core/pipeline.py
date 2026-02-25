@@ -175,9 +175,9 @@ def run_pipeline(
         # Post-processing and save for segment-based paths (API or LLM)
         if use_api or needs_llm:
             from pgw.subtitles.converter import save_subtitles
-            from pgw.transcriber.postprocess import fix_dangling_clitics
+            from pgw.transcriber.postprocess import postprocess_segments
 
-            segments = fix_dangling_clitics(segments, language)
+            segments = postprocess_segments(segments, language)
 
             if cleanup and config.llm.cleanup_enabled:
                 from pgw.llm.cleanup import cleanup_subtitles
@@ -204,10 +204,10 @@ def run_pipeline(
         console.print("[dim]Transcription found, skipping.[/dim]")
         if needs_llm:
             from pgw.subtitles.converter import load_subtitles
-            from pgw.transcriber.postprocess import fix_dangling_clitics
+            from pgw.transcriber.postprocess import postprocess_segments
 
             segments = load_subtitles(vtt_path)
-            segments = fix_dangling_clitics(segments, language)
+            segments = postprocess_segments(segments, language)
 
     emit("transcribe", 1.0, "Transcription complete")
 

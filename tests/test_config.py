@@ -1,6 +1,6 @@
 """Tests for configuration system."""
 
-from pgw.core.config import _deep_merge, load_config
+from pgw.core.config import deep_merge, load_config
 
 
 def test_cli_overrides():
@@ -36,16 +36,16 @@ def test_llm_model_property_selects_backend():
     assert api.llm.model == api.llm.api_model
 
 
-def test_deep_merge():
+def testdeep_merge():
     base = {"a": {"b": 1, "c": 2}, "d": 3}
     override = {"a": {"b": 10, "e": 5}, "f": 6}
-    result = _deep_merge(base, override)
+    result = deep_merge(base, override)
     assert result == {"a": {"b": 10, "c": 2, "e": 5}, "d": 3, "f": 6}
 
 
-def test_deep_merge_no_mutation():
+def testdeep_merge_no_mutation():
     """Deep merge does not mutate the base dict."""
     base = {"a": {"b": 1}}
     override = {"a": {"c": 2}}
-    _deep_merge(base, override)
+    deep_merge(base, override)
     assert "c" not in base["a"]

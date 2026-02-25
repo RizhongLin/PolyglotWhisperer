@@ -14,6 +14,13 @@ from pgw.core.config import WhisperConfig
 from pgw.core.models import SubtitleSegment
 from pgw.utils.cache import cache_key, get_cache_dir
 from pgw.utils.console import console
+from pgw.utils.text import (
+    CLAUSE_PUNCT,
+    MAX_SEGMENT_DURATION,
+    MERGE_GAP_THRESHOLD,
+    SENTENCE_END_CHARS,
+    SPEECH_GAP_THRESHOLD,
+)
 
 # 25 MB upload limit for Groq/OpenAI Whisper API
 _MAX_FILE_SIZE = 25 * 1024 * 1024
@@ -64,7 +71,7 @@ def transcribe(
     with open(audio_path, "rb") as f:
         response = litellm.transcription(file=f, **call_kwargs)
 
-    segments = _response_to_segments(response)
+    segments = response_to_segments(response)
     console.print(f"[green]Transcription complete:[/green] {len(segments)} segments")
     return segments
 
@@ -121,7 +128,7 @@ def _compress_for_api(audio_path: Path, workspace_dir: Path | None = None) -> Pa
     return mp3_path
 
 
-def _response_to_segments(response) -> list[SubtitleSegment]:
+def response_to_segments(response) -> list[SubtitleSegment]:
     """Convert a LiteLLM transcription response to SubtitleSegments.
 
     Prefers word-level timestamps for subtitle-optimized regrouping.
@@ -133,7 +140,7 @@ def _response_to_segments(response) -> list[SubtitleSegment]:
     # Try word-level timestamps first
     words = data.get("words") or []
     if words:
-        return _regroup_words(words)
+        return regroup_words(words)
 
     # Fallback: use segment-level timestamps
     raw_segments = data.get("segments") or []
@@ -155,10 +162,10 @@ def _response_to_segments(response) -> list[SubtitleSegment]:
     return []
 
 
-def _regroup_words(
+def regroup_words(
     words: list[dict],
     max_chars: int = 72,
-    max_dur: float = 8.0,
+    max_dur: float = MAX_SEGMENT_DURATION,
 ) -> list[SubtitleSegment]:
     """Regroup word-level timestamps into subtitle-sized segments.
 
@@ -171,14 +178,12 @@ def _regroup_words(
     3. Comma/semicolon if segment has 4+ words
     4. Max chars or max duration exceeded
 
-    Merge rule:
-    - Short fragments (< 3 words) merged if gap < 0.15s
+    Merge rules:
+    - Short trailing fragments (≤2 words) merged into previous segment
+    - Short leading fragments (≤2 words) merged into next segment
     """
     if not words:
         return []
-
-    _SENTENCE_PUNCT = set(".?!。？！")
-    _CLAUSE_PUNCT = set(",;，；")
 
     # Build initial 1-word-per-segment list
     raw: list[dict] = []
@@ -201,18 +206,18 @@ def _regroup_words(
     groups: list[list[dict]] = [[raw[0]]]
     for w in raw[1:]:
         prev_text = groups[-1][-1]["text"]
-        if prev_text and prev_text[-1] in _SENTENCE_PUNCT:
+        if prev_text and prev_text[-1] in SENTENCE_END_CHARS:
             groups.append([w])
         else:
             groups[-1].append(w)
 
-    # Phase 2: Split by speech gaps > 0.5s
+    # Phase 2: Split by speech gaps
     split = []
     for group in groups:
         current = [group[0]]
         for w in group[1:]:
             gap = w["start"] - current[-1]["end"]
-            if gap > 0.5:
+            if gap > SPEECH_GAP_THRESHOLD:
                 split.append(current)
                 current = [w]
             else:
@@ -226,7 +231,7 @@ def _regroup_words(
         current = [group[0]]
         for w in group[1:]:
             prev_text = current[-1]["text"]
-            if len(current) >= 4 and prev_text and prev_text[-1] in _CLAUSE_PUNCT:
+            if len(current) >= 4 and prev_text and prev_text[-1] in CLAUSE_PUNCT:
                 split.append(current)
                 current = [w]
             else:
@@ -252,17 +257,20 @@ def _regroup_words(
         split.append(current)
     groups = split
 
-    # Phase 5: Merge short fragments (< 3 words) if gap < 0.15s
+    # Phase 5a: Merge short trailing fragments into PREVIOUS segment.
+    # Catches sentence-completing fragments like "fiscal.", "en Ukraine."
+    # that were split off by the max_chars/max_dur phase.
     merged: list[list[dict]] = [groups[0]]
     for group in groups[1:]:
         prev = merged[-1]
+        prev_text = " ".join(w["text"] for w in prev)
         gap = group[0]["start"] - prev[-1]["end"]
-        combined_words = len(prev) + len(group)
         combined_text = " ".join(w["text"] for w in prev + group)
         if (
-            len(prev) < 3
-            and gap < 0.15
-            and combined_words <= 10
+            len(group) <= 2
+            and gap < SPEECH_GAP_THRESHOLD
+            and prev_text
+            and prev_text[-1] not in SENTENCE_END_CHARS
             and len(combined_text) <= max_chars
         ):
             merged[-1].extend(group)
@@ -270,15 +278,37 @@ def _regroup_words(
             merged.append(group)
     groups = merged
 
-    # Convert groups to SubtitleSegments
+    # Phase 5b: Merge short leading fragments into NEXT segment.
+    merged = [groups[0]]
+    for group in groups[1:]:
+        prev = merged[-1]
+        gap = group[0]["start"] - prev[-1]["end"]
+        combined_text = " ".join(w["text"] for w in prev + group)
+        if (
+            len(prev) <= 2
+            and gap < MERGE_GAP_THRESHOLD
+            and len(prev) + len(group) <= 10
+            and len(combined_text) <= max_chars
+        ):
+            merged[-1].extend(group)
+        else:
+            merged.append(group)
+    groups = merged
+
+    # Phase 6: Convert groups to SubtitleSegments and fix overlapping timestamps
     segments = []
     for group in groups:
         text = " ".join(w["text"] for w in group)
+        start = group[0]["start"]
+        end = group[-1]["end"]
+        # Clamp start to previous segment's end to prevent overlap
+        if segments and start < segments[-1].end:
+            start = segments[-1].end
         segments.append(
             SubtitleSegment(
                 text=text,
-                start=group[0]["start"],
-                end=group[-1]["end"],
+                start=start,
+                end=max(end, start),
             )
         )
 

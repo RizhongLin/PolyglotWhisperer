@@ -12,6 +12,7 @@ from pgw.subtitles.converter import (
     save_bilingual_vtt,
     save_subtitles,
 )
+from pgw.utils.spacy import load_spacy_model
 
 
 def test_save_and_load_vtt_roundtrip(tmp_path: Path):
@@ -173,18 +174,12 @@ def test_format_vtt_time(seconds, expected):
 spacy = pytest.importorskip("spacy")
 
 
-def _ensure_spacy_model(lang: str, model: str):
-    """Load spaCy model, downloading if needed."""
-    try:
-        return spacy.load(model, disable=["parser", "lemmatizer", "ner"])
-    except OSError:
-        spacy.cli.download(model)
-        return spacy.load(model, disable=["parser", "lemmatizer", "ner"])
-
-
 @pytest.fixture(scope="module")
 def fr_nlp():
-    return _ensure_spacy_model("fr", "fr_core_news_sm")
+    nlp = load_spacy_model("fr")
+    if nlp is None:
+        pytest.skip("French spaCy model not available")
+    return nlp
 
 
 def test_fix_dangling_clitics_trailing_apostrophe(fr_nlp):
@@ -242,12 +237,18 @@ def test_fix_dangling_clitics_empty_after_removal(fr_nlp):
 
 @pytest.fixture(scope="module")
 def it_nlp():
-    return _ensure_spacy_model("it", "it_core_news_sm")
+    nlp = load_spacy_model("it")
+    if nlp is None:
+        pytest.skip("Italian spaCy model not available")
+    return nlp
 
 
 @pytest.fixture(scope="module")
 def ca_nlp():
-    return _ensure_spacy_model("ca", "ca_core_news_sm")
+    nlp = load_spacy_model("ca")
+    if nlp is None:
+        pytest.skip("Catalan spaCy model not available")
+    return nlp
 
 
 def test_fix_dangling_clitics_italian_apostrophe(it_nlp):

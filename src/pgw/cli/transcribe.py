@@ -6,9 +6,8 @@ from pathlib import Path
 from typing import Annotated, Optional
 
 import typer
-from rich.table import Table
 
-from pgw.cli.utils import expand_inputs
+from pgw.cli.utils import build_config_overrides, expand_inputs, print_batch_summary
 from pgw.core.config import PGWConfig, load_config
 from pgw.downloader.resolver import is_url, resolve
 from pgw.utils.audio import extract_audio
@@ -82,20 +81,14 @@ def transcribe(
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(1)
 
-    overrides: dict[str, object] = {
-        "whisper.language": language,
-        "whisper.device": device,
-    }
-    if whisper_model is not None:
-        model_key = "whisper.api_model" if backend == "api" else "whisper.local_model"
-        overrides[model_key] = whisper_model
-    if llm_model is not None:
-        model_key = "llm.api_model" if llm_backend == "api" else "llm.local_model"
-        overrides[model_key] = llm_model
-    if llm_backend is not None:
-        overrides["llm.backend"] = llm_backend
-    if backend is not None:
-        overrides["whisper.backend"] = backend
+    overrides = build_config_overrides(
+        language=language,
+        device=device,
+        whisper_model=whisper_model,
+        llm_model=llm_model,
+        llm_backend=llm_backend,
+        backend=backend,
+    )
     config = load_config(**overrides)
 
     expanded = expand_inputs(inputs)
@@ -146,20 +139,7 @@ def transcribe(
 
     # Summary table
     console.print()
-    table = Table(title=f"Batch Results ({len(expanded)} files)")
-    table.add_column("#", justify="right", style="dim")
-    table.add_column("Input", max_width=50, no_wrap=True)
-    table.add_column("Status")
-
-    succeeded = 0
-    for i, (inp, status, _) in enumerate(results, 1):
-        style = "green" if status == "success" else "red"
-        table.add_row(str(i), inp, f"[{style}]{status}[/{style}]")
-        if status == "success":
-            succeeded += 1
-
-    console.print(table)
-    console.print(f"\n[bold]{succeeded}/{len(expanded)} succeeded[/bold]")
+    print_batch_summary(results, total=len(expanded))
 
 
 def _transcribe_single(
@@ -204,10 +184,10 @@ def _transcribe_single(
         # API transcription — returns segments directly
         from pgw.subtitles.converter import save_subtitles
         from pgw.transcriber.api import transcribe as api_transcribe
-        from pgw.transcriber.postprocess import fix_dangling_clitics
+        from pgw.transcriber.postprocess import postprocess_segments
 
         segments = api_transcribe(audio_path, config.whisper, config.workspace_dir)
-        segments = fix_dangling_clitics(segments, language)
+        segments = postprocess_segments(segments, language)
 
         if cleanup:
             from pgw.llm.cleanup import cleanup_subtitles
@@ -225,10 +205,10 @@ def _transcribe_single(
         if cleanup:
             from pgw.llm.cleanup import cleanup_subtitles
             from pgw.subtitles.converter import result_to_segments, save_subtitles
-            from pgw.transcriber.postprocess import fix_dangling_clitics
+            from pgw.transcriber.postprocess import postprocess_segments
 
             segments = result_to_segments(result)
-            segments = fix_dangling_clitics(segments, language)
+            segments = postprocess_segments(segments, language)
             console.print("[bold]Cleaning up with LLM...[/bold]")
             segments = cleanup_subtitles(segments, language, config.llm)
             save_subtitles(segments, sub_path, fmt=fmt)

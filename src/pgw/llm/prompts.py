@@ -1,5 +1,10 @@
 """Prompt templates for subtitle cleanup and translation."""
 
+import json
+
+# Prefix for segments where translation failed or was missing
+UNTRANSLATED_MARKER = "[?] "
+
 CLEANUP_SYSTEM = """\
 You are a subtitle editor. Your task is to clean up automatic speech recognition (ASR) \
 output while preserving the original meaning and timing structure.
@@ -36,29 +41,36 @@ Return exactly {count} numbered lines, one per input line.
 
 TRANSLATION_SYSTEM = """\
 You are a professional subtitle translator. Translate subtitle segments \
-into natural, idiomatic {target_lang} that sounds like it was originally written \
-in {target_lang} — not a word-for-word translation.
+into natural, idiomatic {target_lang} — not word-for-word from {source_lang}.
 
 Rules:
+- Return exactly the same number of translations as input lines — do NOT merge or split segments
 - Translate ONLY the numbered lines between the ===BEGIN=== and ===END=== markers
-- Return exactly the same number of numbered lines as the input
-- Restructure sentences to follow {target_lang} grammar and word order naturally
-- Use natural connectives and phrasing in {target_lang}, not calques from {source_lang}
-- Consecutive lines are part of the same speech — ensure coherence across lines \
-(e.g. if a sentence spans two lines, the translations should read naturally together)
+- Consecutive lines are part of the same speech and a sentence may span multiple lines. \
+Keep each line's core meaning roughly aligned with its source (subtitles are timed to audio), \
+but always ensure the translated lines read coherently and fluently when joined together
+- Use natural {target_lang} grammar, word order, and phrasing \
+— avoid mimicking {source_lang} structure
 - Keep proper nouns (names, places, brands) in their original form
 - Keep translations concise — suitable for subtitle display
-- Do NOT merge or split segments
-- Do NOT include any extra text, explanations, or commentary
+- Do NOT add extra text, explanations, or commentary
 
-Output format — return ONLY numbered translations like:
-1. translated text
-2. translated text
+Example — a sentence split across two lines:
+Input:
+1. Le président a annoncé une nouvelle taxe
+2. sur les importations en provenance d'Asie.
+Good output (aligned and coherent):
+{{"translations": ["The president announced a new tax", "on imports from Asia."]}}
+Bad output (meaning shifted across lines):
+{{"translations": ["The president announced", "a new tax on imports from Asia."]}}
+
+Output format — return a JSON object with a "translations" key:
+{{"translations": ["translation 1", "translation 2", ...]}}
 """
 
 TRANSLATION_USER = """\
 Translate these {count} lines from {source_lang} to {target_lang}. \
-Return exactly {count} numbered lines.
+Return exactly {count} translations as a JSON object: {{"translations": [...]}}.
 
 {context}===BEGIN===
 {numbered_segments}
@@ -92,6 +104,16 @@ def format_history_context(
     )
 
 
+def _normalize_parsed(parsed: list[str], expected_count: int) -> tuple[list[str], bool]:
+    """Truncate or pad a parsed list to expected_count, returning exact_match flag."""
+    exact_match = len(parsed) == expected_count
+    if len(parsed) > expected_count:
+        parsed = parsed[:expected_count]
+    while len(parsed) < expected_count:
+        parsed.append("")
+    return parsed, exact_match
+
+
 def parse_numbered_response(response: str, expected_count: int) -> tuple[list[str], bool]:
     """Parse a numbered LLM response back into a list of texts.
 
@@ -114,14 +136,81 @@ def parse_numbered_response(response: str, expected_count: int) -> tuple[list[st
                 break
         # Skip non-numbered lines entirely
 
-    exact_match = len(parsed) == expected_count
+    return _normalize_parsed(parsed, expected_count)
 
-    # If we got more lines than expected, take only the first N
-    if len(parsed) > expected_count:
-        parsed = parsed[:expected_count]
 
-    # If we got fewer, pad with empty strings (will fall back to original)
-    while len(parsed) < expected_count:
-        parsed.append("")
+def parse_json_response(response: str, expected_count: int) -> tuple[list[str], bool]:
+    """Try to parse a JSON object response from the LLM.
 
-    return parsed, exact_match
+    Expected format: {"translations": ["t1", "t2", ...]}
+    Falls back gracefully — returns ([], False) if response is not valid JSON
+    or does not contain a translations array.
+    """
+    text = response.strip()
+    # Strip markdown code fences if present
+    if text.startswith("```"):
+        lines = text.splitlines()
+        lines = [line for line in lines[1:] if not line.strip().startswith("```")]
+        text = "\n".join(lines)
+
+    try:
+        data = json.loads(text)
+    except (ValueError, json.JSONDecodeError):
+        return [], False
+
+    if not isinstance(data, dict):
+        return [], False
+
+    # Extract translations array from the object
+    translations = None
+    for key in ("translations", "translated", "results"):
+        if key in data and isinstance(data[key], list):
+            translations = data[key]
+            break
+
+    if translations is None:
+        return [], False
+
+    parsed = [str(item).strip() for item in translations]
+    return _normalize_parsed(parsed, expected_count)
+
+
+def filter_empty_segments(texts: list[str]) -> tuple[list[int], list[str]]:
+    """Filter out empty/whitespace-only texts for LLM processing.
+
+    Returns:
+        Tuple of (non-empty indices, non-empty texts).
+    """
+    non_empty_idx = [j for j, t in enumerate(texts) if t.strip()]
+    non_empty_texts = [texts[j] for j in non_empty_idx]
+    return non_empty_idx, non_empty_texts
+
+
+def reconstruct_with_empties(
+    texts: list[str],
+    non_empty_idx: list[int],
+    result_texts: list[str],
+) -> list[str]:
+    """Reconstruct full text list, restoring empty positions with originals as fallback."""
+    reconstructed = [""] * len(texts)
+    for j, idx in enumerate(non_empty_idx):
+        reconstructed[idx] = result_texts[j] if j < len(result_texts) else texts[idx]
+    return reconstructed
+
+
+def format_bilingual_context(
+    source_texts: list[str],
+    translated_texts: list[str],
+    label: str = "preceding",
+) -> str:
+    """Format bilingual pairs as overlap context.
+
+    Shows how preceding/following segments were translated, giving
+    the LLM concrete examples of boundary translations.
+    """
+    if not source_texts:
+        return ""
+    parts = []
+    for src, tgt in zip(source_texts, translated_texts):
+        parts.append(f"[{label}] {src} -> {tgt}")
+    return "\n".join(parts)
