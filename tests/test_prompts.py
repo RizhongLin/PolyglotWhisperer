@@ -110,6 +110,20 @@ def test_parse_json_response_count_mismatch():
     assert exact is False
 
 
+def test_parse_json_response_keyed_format():
+    response = '{"1": "Hello", "2": "World"}'
+    result, exact = parse_json_response(response, 2)
+    assert result == ["Hello", "World"]
+    assert exact is True
+
+
+def test_parse_json_response_keyed_format_mismatch():
+    response = '{"1": "A", "2": "B", "3": "C"}'
+    result, exact = parse_json_response(response, 2)
+    assert result == ["A", "B"]
+    assert exact is False
+
+
 # --- Bilingual context formatter tests ---
 
 
@@ -119,8 +133,9 @@ def test_format_bilingual_context_empty():
 
 def test_format_bilingual_context_pairs():
     result = format_bilingual_context(["Bonjour", "Merci"], ["Hello", "Thanks"])
-    assert "[preceding] Bonjour -> Hello" in result
-    assert "[preceding] Merci -> Thanks" in result
+    assert "preceding:" in result
+    assert '"Bonjour": "Hello"' in result
+    assert '"Merci": "Thanks"' in result
 
 
 # --- Untranslated marker constant ---
