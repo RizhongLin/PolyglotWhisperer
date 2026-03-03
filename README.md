@@ -1,6 +1,10 @@
-# PolyglotWhisperer
+<p align="center">
+  <img src="src/pgw/templates/logo.png" width="400" alt="PolyglotWhisperer logo">
+</p>
 
-Video transcription and translation CLI for language learners. Transcribe with Whisper (local or cloud API), translate with LLMs, play with dual subtitles — all in one pipeline.
+<h1 align="center">PolyglotWhisperer</h1>
+
+<p align="center">Video transcription and translation CLI for language learners.<br>Transcribe with Whisper (local or cloud API), translate with LLMs, play with dual subtitles — all in one pipeline.</p>
 
 ## Features
 

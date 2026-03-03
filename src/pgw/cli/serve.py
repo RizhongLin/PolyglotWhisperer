@@ -22,6 +22,8 @@ GITHUB_URL = "https://github.com/RizhongLin/PolyglotWhisperer"
 
 _PLAYER_TEMPLATE = (files("pgw.templates") / "player.html").read_text(encoding="utf-8")
 _PLAYER_CSS = (files("pgw.templates") / "player.css").read_text(encoding="utf-8")
+_ICON_PNG = (files("pgw.templates") / "icon.png").read_bytes()
+_LOGO_PNG = (files("pgw.templates") / "logo.png").read_bytes()
 
 
 def _discover_tracks(workspace: Path) -> list[dict[str, str]]:
@@ -270,7 +272,11 @@ def serve(
     player_html = _build_html(workspace, video_path)
 
     handler_class = functools.partial(
-        _WorkspaceHandler, workspace=workspace, player_html=player_html, player_css=_PLAYER_CSS
+        _WorkspaceHandler,
+        workspace=workspace,
+        player_html=player_html,
+        player_css=_PLAYER_CSS,
+        icon_png=_ICON_PNG,
     )
     server = http.server.HTTPServer((host, port), handler_class)
 
@@ -298,10 +304,13 @@ def serve(
 class _WorkspaceHandler(http.server.BaseHTTPRequestHandler):
     """Serve workspace files and the player HTML."""
 
-    def __init__(self, *args, workspace: Path, player_html: str, player_css: str, **kwargs):
+    def __init__(
+        self, *args, workspace: Path, player_html: str, player_css: str, icon_png: bytes, **kwargs
+    ):
         self.workspace = workspace
         self.player_html = player_html
         self.player_css = player_css
+        self.icon_png = icon_png
         super().__init__(*args, **kwargs)
 
     def do_GET(self) -> None:
@@ -313,6 +322,10 @@ class _WorkspaceHandler(http.server.BaseHTTPRequestHandler):
                 self._serve_html()
             elif path == "player.css":
                 self._serve_css()
+            elif path == "icon.png":
+                self._serve_icon()
+            elif path == "logo.png":
+                self._serve_logo()
             else:
                 self._serve_file(path)
         except (BrokenPipeError, ConnectionResetError):
@@ -333,6 +346,22 @@ class _WorkspaceHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(content)))
         self.end_headers()
         self.wfile.write(content)
+
+    def _serve_icon(self) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "image/png")
+        self.send_header("Content-Length", str(len(self.icon_png)))
+        self.send_header("Cache-Control", "public, max-age=86400")
+        self.end_headers()
+        self.wfile.write(self.icon_png)
+
+    def _serve_logo(self) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "image/png")
+        self.send_header("Content-Length", str(len(_LOGO_PNG)))
+        self.send_header("Cache-Control", "public, max-age=86400")
+        self.end_headers()
+        self.wfile.write(_LOGO_PNG)
 
     def _serve_file(self, filename: str) -> None:
         # Only serve files that exist in the workspace (no path traversal)

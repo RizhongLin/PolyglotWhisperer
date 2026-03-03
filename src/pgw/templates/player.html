@@ -7,13 +7,14 @@
 <title>{title} — PolyglotWhisperer</title>
 <link rel="stylesheet"
   href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.classless.min.css">
+<link rel="icon" type="image/png" href="/icon.png">
 <link rel="stylesheet" href="/player.css">
 </head>
 <body>
 <header>
   <hgroup>
     <h1>{title}</h1>
-    <p>PolyglotWhisperer</p>
+    <p><img src="/icon.png" class="brand-logo" alt="">PolyglotWhisperer</p>
   </hgroup>
   <button id="theme-toggle" class="outline secondary"
     aria-label="Toggle theme"></button>
@@ -56,12 +57,16 @@
   </div>
 </main>
 <footer>
+  <p><img src="/logo.png" class="footer-logo" alt="PolyglotWhisperer"></p>
   <p>
-    <strong>PolyglotWhisperer</strong> &mdash;
-    Video transcription &amp; translation for language learners
+    <span class="footer-brand">PolyglotWhisperer</span>
+    <span class="footer-sep">&middot;</span>
+    <em>Video transcription &amp; translation for language learners</em>
   </p>
-  <p><small><a href="{github_url}" target="_blank"
-    rel="noopener"><i data-lucide="github"></i> GitHub</a></small></p>
+  <p>
+    <a class="footer-gh" href="{github_url}" target="_blank"
+      rel="noopener"><i data-lucide="github"></i> GitHub</a>
+  </p>
 </footer>
 <script src="https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.min.js"></script>
 <script>
@@ -115,7 +120,18 @@
       `<input type="checkbox" id="${{id}}"${{chk}}>` +
       `<span><i data-lucide="captions"></i>${{t.label}}</span>`;
     label.querySelector('input').addEventListener('change', (e) => {{
-      t.mode = e.target.checked ? 'showing' : 'hidden';
+      if (e.target.checked) {{
+        // Radio behaviour: uncheck all others
+        controls.querySelectorAll('input').forEach((inp) => {{
+          if (inp !== e.target) {{
+            inp.checked = false;
+            tracks[parseInt(inp.id.split('-')[1])].mode = 'hidden';
+          }}
+        }});
+        t.mode = 'showing';
+      }} else {{
+        t.mode = 'hidden';
+      }}
       buildTranscript();
     }});
     controls.appendChild(label);
@@ -140,6 +156,28 @@
     return null;
   }}
 
+  function isBilingualTrack(track) {{
+    return track && track.label && track.label.toLowerCase().includes('bilingual');
+  }}
+
+  function groupBilingualCues(cues) {{
+    const groups = [];
+    for (let i = 0; i < cues.length; i += 2) {{
+      const a = cues[i];
+      const b = (i + 1 < cues.length) ? cues[i + 1] : null;
+      if (b && a.startTime === b.startTime && a.endTime === b.endTime) {{
+        const ta = a.text.replace(/<[^>]*>/g, '').trim();
+        const tb = b.text.replace(/<[^>]*>/g, '').trim();
+        if (ta || tb) groups.push({{ startTime: a.startTime, endTime: a.endTime, texts: [ta, tb] }});
+      }} else {{
+        const ta = a.text.replace(/<[^>]*>/g, '').trim();
+        if (ta) groups.push({{ startTime: a.startTime, endTime: a.endTime, texts: [ta] }});
+        if (b) {{ i--; }}  // re-process b as start of next pair
+      }}
+    }}
+    return groups;
+  }}
+
   function buildTranscript() {{
     const track = getFirstShowingTrack();
     if (!track || !track.cues || track.cues.length === 0) {{
@@ -150,22 +188,41 @@
     }}
     transcriptCues = [];
     let html = '';
-    for (let i = 0; i < track.cues.length; i++) {{
-      const cue = track.cues[i];
-      const text = cue.text.replace(/<[^>]*>/g, '').trim();
-      if (!text) continue;
-      transcriptCues.push(cue);
-      html += `<div class="cue-row future" data-idx="${{transcriptCues.length - 1}}">`
-        + `<span class="cue-time">${{fmtTime(cue.startTime)}}</span>`
-        + `<span class="cue-text">${{text}}</span></div>`;
+    const bilingual = isBilingualTrack(track);
+
+    if (bilingual) {{
+      const groups = groupBilingualCues(track.cues);
+      for (const g of groups) {{
+        transcriptCues.push(g);
+        const idx = transcriptCues.length - 1;
+        let textHtml = `<span class="cue-lang-a">${{g.texts[0]}}</span>`;
+        if (g.texts[1]) textHtml += `<br><span class="cue-lang-b">${{g.texts[1]}}</span>`;
+        html += `<div class="cue-row future" data-idx="${{idx}}">`
+          + `<span class="cue-time">${{fmtTime(g.startTime)}}</span>`
+          + `<span class="cue-text">${{textHtml}}</span></div>`;
+      }}
+    }} else {{
+      for (let i = 0; i < track.cues.length; i++) {{
+        const cue = track.cues[i];
+        const text = cue.text.replace(/<[^>]*>/g, '').trim();
+        if (!text) continue;
+        transcriptCues.push(cue);
+        html += `<div class="cue-row future" data-idx="${{transcriptCues.length - 1}}">`
+          + `<span class="cue-time">${{fmtTime(cue.startTime)}}</span>`
+          + `<span class="cue-text">${{text}}</span></div>`;
+      }}
     }}
+
     transcriptBody.innerHTML = html;
     transcriptBody.querySelectorAll('.cue-row').forEach((row) => {{
       row.addEventListener('click', () => {{
         const idx = parseInt(row.dataset.idx);
         if (idx === activeRow) {{
           // Active row: copy text
-          const text = row.querySelector('.cue-text').textContent;
+          const cueData = transcriptCues[idx];
+          const text = cueData.texts
+            ? cueData.texts.join('\n')
+            : row.querySelector('.cue-text').textContent;
           navigator.clipboard.writeText(text).then(() => {{
             copyToast.classList.add('show');
             clearTimeout(toastTimer);
