@@ -43,29 +43,35 @@ TRANSLATION_SYSTEM = """\
 You are a professional subtitle translator. Translate subtitle segments \
 into natural, idiomatic {target_lang} — not word-for-word from {source_lang}.
 
-Rules:
-- Each key in the input MUST have exactly one translation in the output — \
-do NOT merge or split segments. Every key ("1", "2", ...) must appear in the output.
+CRITICAL — strict 1:1 mapping:
+- The output MUST contain EVERY key from the input ("1", "2", ..., "N"). \
+No key may be skipped, merged, or left empty.
+- These are timed subtitles — each segment is synced to audio. \
+Merging segments would break the timing. \
+Even if two consecutive segments form one sentence, \
+they MUST remain as two separate translations.
+- Short fragments like prepositional phrases, continuations, \
+or sentence endings MUST still get their own translation — \
+never absorb a fragment into the previous key.
+
+Other rules:
 - Translate ONLY the segments between the ===BEGIN=== and ===END=== markers
-- Consecutive segments are part of the same speech and a sentence may span multiple segments. \
-Keep each segment's core meaning roughly aligned with its source (subtitles are timed to audio), \
-but always ensure the translated segments read coherently and fluently when joined together
-- Use natural {target_lang} grammar, word order, and phrasing \
-— avoid mimicking {source_lang} structure
+- Use natural {target_lang} grammar, word order, and phrasing
 - Keep proper nouns (names, places, brands) in their original form
 - Keep translations concise — suitable for subtitle display
 - Do NOT add extra text, explanations, or commentary
 
-Example — a sentence split across two segments:
+Example — a sentence split across THREE segments (all keys preserved):
 Input:
-{{"1": "Le président a annoncé une nouvelle taxe", \
-"2": "sur les importations en provenance d'Asie."}}
-Good output (1:1 mapping, each key preserved):
-{{"1": "The president announced a new tax", \
-"2": "on imports from Asia."}}
-Bad output (key "2" merged into "1"):
-{{"1": "The president announced a new tax on imports from Asia.", \
-"2": ""}}
+{{"1": "L'armée a abattu deux avions", \
+"2": "en provenance d'Iran", \
+"3": "au-dessus de la capitale."}}
+Good output (every key has its own translation):
+{{"1": "The army shot down two planes", \
+"2": "coming from Iran", \
+"3": "over the capital."}}
+Bad output (keys merged — NEVER do this):
+{{"1": "The army shot down two planes from Iran over the capital."}}
 
 Output format — return a JSON object with the SAME numbered keys as the input:
 {{"1": "translation 1", "2": "translation 2", ...}}
@@ -73,7 +79,8 @@ Output format — return a JSON object with the SAME numbered keys as the input:
 
 TRANSLATION_USER = """\
 Translate these {count} segments from {source_lang} to {target_lang}. \
-Return a JSON object with keys "1" through "{count}", each mapped to its translation.
+Return a JSON object with EXACTLY {count} keys ("1" through "{count}"). \
+Every key must appear — do NOT merge segments.
 
 {context}===BEGIN===
 {json_segments}
