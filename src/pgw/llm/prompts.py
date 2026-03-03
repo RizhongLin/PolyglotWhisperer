@@ -79,8 +79,12 @@ Return exactly {count} translations as a JSON object: {{"translations": [...]}}.
 
 
 def format_numbered_segments(texts: list[str]) -> str:
-    """Format a list of subtitle texts as numbered lines for LLM input."""
-    return "\n".join(f"{i + 1}. {text}" for i, text in enumerate(texts))
+    """Format a list of subtitle texts as numbered lines for LLM input.
+
+    Collapses newlines within each text to spaces so the model sees
+    exactly one line per numbered item (subtitle line wraps are visual only).
+    """
+    return "\n".join(f"{i + 1}. {' '.join(text.split())}" for i, text in enumerate(texts))
 
 
 def format_history_context(
