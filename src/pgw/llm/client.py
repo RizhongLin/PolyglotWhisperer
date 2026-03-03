@@ -90,16 +90,20 @@ def complete(
         "num_retries": config.num_retries,
         **kwargs,
     }
-    if _extract_ollama_model(config.model) is not None and config.api_base:
-        call_kwargs["api_base"] = config.api_base
+    if _extract_ollama_model(config.model) is not None:
+        if config.api_base:
+            call_kwargs["api_base"] = config.api_base
+        # Disable thinking mode for reasoning models (qwen3.5, etc.)
+        # Thinking consumes the token budget and leaves content empty
+        call_kwargs.setdefault("extra_body", {})["think"] = False
 
     response = completion(**call_kwargs)
 
     if not response.choices:
         raise RuntimeError("LLM returned empty response (no choices)")
     content = response.choices[0].message.content
-    if content is None:
-        raise RuntimeError("LLM returned None content")
+    if not content:
+        raise RuntimeError("LLM returned empty content")
     return content
 
 
