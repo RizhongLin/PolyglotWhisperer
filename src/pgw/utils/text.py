@@ -28,3 +28,8 @@ TIMING_GAP_THRESHOLD = 1.0
 
 # Maximum duration for a single subtitle segment
 MAX_SEGMENT_DURATION = 8.0
+
+# Extra character allowance when merging short trailing fragments back.
+# Keeps the initial split tight for readability while preventing
+# dangling 1-2 word fragments at segment boundaries.
+MERGE_CHAR_SLACK = 15

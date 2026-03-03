@@ -15,6 +15,7 @@ from pgw.utils.spacy import load_spacy_model
 from pgw.utils.text import (
     APOSTROPHES,
     MAX_SEGMENT_DURATION,
+    MERGE_CHAR_SLACK,
     MERGE_GAP_THRESHOLD,
     SENTENCE_END_CHARS,
     SPEECH_GAP_THRESHOLD,
@@ -55,10 +56,11 @@ def _merge_short_trailing(result, max_chars: int) -> None:
     """Merge ≤2-word trailing fragments into the previous segment.
 
     Handles cases where split_by_length or split_by_duration creates short
-    trailing fragments (e.g., "fiscal.", "en Ukraine.") that complete the
-    previous segment's sentence.  Only merges when the previous segment
-    does NOT end with sentence punctuation (indicating the fragment is a
-    continuation, not a new sentence).
+    trailing fragments that complete the previous segment's sentence.
+    Only merges when the previous segment does NOT end with sentence
+    punctuation (indicating the fragment is a continuation, not a new
+    sentence).  Uses MERGE_CHAR_SLACK to allow slightly longer combined
+    segments rather than leaving dangling fragments.
 
     Operates on stable-ts WhisperResult segments with word-level data.
     """
@@ -76,7 +78,7 @@ def _merge_short_trailing(result, max_chars: int) -> None:
                 prev_text
                 and gap < SPEECH_GAP_THRESHOLD
                 and prev_text[-1] not in SENTENCE_END_CHARS
-                and len(prev_text) + 1 + len(seg_text) <= max_chars
+                and len(prev_text) + 1 + len(seg_text) <= max_chars + MERGE_CHAR_SLACK
             ):
                 # Move all words from seg into prev
                 for w in seg.words:

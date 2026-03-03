@@ -17,6 +17,7 @@ from pgw.utils.console import console
 from pgw.utils.text import (
     CLAUSE_PUNCT,
     MAX_SEGMENT_DURATION,
+    MERGE_CHAR_SLACK,
     MERGE_GAP_THRESHOLD,
     SENTENCE_END_CHARS,
     SPEECH_GAP_THRESHOLD,
@@ -278,8 +279,9 @@ def regroup_words(
     groups = split
 
     # Phase 5a: Merge short trailing fragments into PREVIOUS segment.
-    # Catches sentence-completing fragments like "fiscal.", "en Ukraine."
-    # that were split off by the max_chars/max_dur phase.
+    # Uses MERGE_CHAR_SLACK to allow slightly longer combined segments
+    # rather than leaving dangling 1-2 word fragments.
+    merge_limit = max_chars + MERGE_CHAR_SLACK
     merged: list[list[dict]] = [groups[0]]
     for group in groups[1:]:
         prev = merged[-1]
@@ -291,7 +293,7 @@ def regroup_words(
             and gap < SPEECH_GAP_THRESHOLD
             and prev_text
             and prev_text[-1] not in SENTENCE_END_CHARS
-            and len(combined_text) <= max_chars
+            and len(combined_text) <= merge_limit
         ):
             merged[-1].extend(group)
         else:
@@ -308,7 +310,7 @@ def regroup_words(
             len(prev) <= 2
             and gap < MERGE_GAP_THRESHOLD
             and len(prev) + len(group) <= 10
-            and len(combined_text) <= max_chars
+            and len(combined_text) <= merge_limit
         ):
             merged[-1].extend(group)
         else:

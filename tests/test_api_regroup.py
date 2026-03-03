@@ -78,11 +78,12 @@ class TestRegroupWords:
         assert "One two three four," in texts
 
     def test_phase4_max_chars_split(self):
-        """Segments exceeding max_chars should be split."""
+        """Segments exceeding max_chars + merge slack should stay split."""
         words = [
-            {"word": "a" * 30, "start": 0.0, "end": 0.5},
-            {"word": "b" * 30, "start": 0.5, "end": 1.0},
+            {"word": "a" * 40, "start": 0.0, "end": 0.5},
+            {"word": "b" * 40, "start": 0.5, "end": 1.0},
         ]
+        # Combined = 81 chars, exceeds max_chars (50) + MERGE_CHAR_SLACK (15) = 65
         segments = regroup_words(words, max_chars=50)
         assert len(segments) == 2
 
