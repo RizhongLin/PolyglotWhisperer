@@ -24,6 +24,7 @@ def run_pipeline(
     start: str | None = None,
     duration: str | None = None,
     on_event: EventCallback | None = None,
+    chunk_size: int | None = None,
 ) -> Path:
     """Run the full processing pipeline.
 
@@ -274,6 +275,7 @@ def run_pipeline(
                 language,
                 translate,
                 config.llm,
+                chunk_size=chunk_size,
                 on_progress=_on_translate_progress,
             )
             llm_was_used = True

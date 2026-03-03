@@ -80,12 +80,10 @@ def complete(
     litellm.drop_params = True  # silently drop unsupported params per provider
     ensure_ollama_model(config.model)
 
-    # Only pass api_base for Ollama models — other providers use their own endpoints
     call_kwargs: dict = {
         "model": config.model,
         "messages": messages,
         "temperature": config.temperature,
-        "max_tokens": config.max_tokens,
         "timeout": config.timeout,
         "num_retries": config.num_retries,
         **kwargs,
@@ -96,6 +94,9 @@ def complete(
         # Disable thinking mode for reasoning models (qwen3.5, etc.)
         # Thinking consumes the token budget and leaves content empty
         call_kwargs.setdefault("extra_body", {})["think"] = False
+        # No max_tokens for local models — no cost concern, use full context window
+    else:
+        call_kwargs["max_tokens"] = config.max_tokens
 
     response = completion(**call_kwargs)
 
@@ -104,6 +105,16 @@ def complete(
     content = response.choices[0].message.content
     if not content:
         raise RuntimeError("LLM returned empty content")
+
+    # Strip thinking traces from reasoning models (e.g. qwen3.5)
+    # Some Ollama/LiteLLM versions ignore think=False and include <think> tags in content
+    if "<think>" in content:
+        import re
+
+        content = re.sub(r"<think>.*?</think>\s*", "", content, flags=re.DOTALL).strip()
+        if not content:
+            raise RuntimeError("LLM response contained only thinking trace, no content")
+
     return content
 
 

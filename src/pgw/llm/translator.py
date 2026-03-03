@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Callable
 
 from pgw.core.config import LLMConfig
@@ -27,6 +28,28 @@ OVERLAP = 8  # Sliding window overlap — segments translated redundantly for co
 HISTORY_SIZE = 8  # Number of previous translated pairs to include as context
 MAX_RETRY_DEPTH = 3  # Max recursion for binary-split retries
 SCAN_RANGE = 5  # How far to scan for sentence boundaries around ideal split point
+
+
+def _auto_chunk_size(model: str) -> int:
+    """Estimate chunk size from model name based on parameter count.
+
+    Smaller models need smaller chunks to produce reliable JSON output.
+    Uses a log-scale formula: chunk_size = clamp(8 * log2(params), 10, 48)
+    This gives roughly: 0.5B→8, 1B→10, 3B→13, 7B→22, 14B→30, 30B→39, 70B→48
+    """
+    import math
+
+    # Extract parameter count from model name (e.g. "qwen3.5:9b" → 9, "70b" → 70)
+    match = re.search(r"(\d+(?:\.\d+)?)[bB]", model)
+    if not match:
+        return CHUNK_SIZE  # Unknown size (API models, etc.), use default
+
+    params = float(match.group(1))
+    if params <= 0:
+        return CHUNK_SIZE
+
+    size = int(8 * math.log2(max(params, 1)))
+    return max(10, min(size, CHUNK_SIZE))
 
 
 def parse_response(response: str, expected_count: int) -> tuple[list[str], bool]:
@@ -215,7 +238,7 @@ def translate_subtitles(
     source_lang: str,
     target_lang: str,
     config: LLMConfig,
-    chunk_size: int = CHUNK_SIZE,
+    chunk_size: int | None = None,
     on_progress: Callable[[float], None] | None = None,
 ) -> TranslationResult:
     """Translate subtitle segments using an LLM.
@@ -238,6 +261,10 @@ def translate_subtitles(
     Returns:
         TranslationResult with original and translated segments.
     """
+    if chunk_size is None:
+        chunk_size = _auto_chunk_size(config.model)
+        console.print(f"[dim]Chunk size: {chunk_size} segments[/dim]")
+
     translated: list[SubtitleSegment] = []
 
     system_prompt = TRANSLATION_SYSTEM.format(

@@ -63,6 +63,10 @@ def run(
         bool,
         typer.Option("--no-subs", help="Skip downloading subtitles from video pages."),
     ] = False,
+    chunk_size: Annotated[
+        Optional[int],
+        typer.Option("--chunk-size", help="Segments per chunk (auto-scaled if omitted)."),
+    ] = None,
 ) -> None:
     """Run the full pipeline: download, transcribe, translate, and play.
 
@@ -113,6 +117,7 @@ def run(
             play=not no_play,
             start=start,
             duration=duration,
+            chunk_size=chunk_size,
         )
         return
 
@@ -131,6 +136,7 @@ def run(
                 play=False,  # Never auto-play in batch mode
                 start=start,
                 duration=duration,
+                chunk_size=chunk_size,
             )
             results.append((input_path, "success", str(workspace)))
         except Exception as e:
