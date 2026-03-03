@@ -14,6 +14,8 @@ from pgw.utils.console import console
 from pgw.utils.spacy import load_spacy_model
 from pgw.utils.text import (
     APOSTROPHES,
+    MAX_MERGE_TRAIL_WORDS,
+    MAX_SEGMENT_CHARS,
     MAX_SEGMENT_DURATION,
     MERGE_CHAR_SLACK,
     MERGE_GAP_THRESHOLD,
@@ -22,12 +24,15 @@ from pgw.utils.text import (
 )
 
 # POS tags that should not dangle at the end of a subtitle segment.
-# DET = determiners (le/la/les/the/der/die/das/el/la/los...)
-# ADP = adpositions/prepositions (de/en/à/of/in/to/von/mit...)
-_DANGLING_POS = {"DET", "ADP"}
+# DET   = determiners (le/la/les/the/der/die/das/el/la/los...)
+# ADP   = adpositions/prepositions (de/en/à/of/in/to/von/mit...)
+# CCONJ = coordinating conjunctions (et/ou/mais/and/or/but/und/oder...)
+# SCONJ = subordinating conjunctions (que/qui/parce/when/if/dass/weil...)
+# AUX   = auxiliaries (est/a/sera/is/has/will/ist/hat...)
+_DANGLING_POS = {"DET", "ADP", "CCONJ", "SCONJ", "AUX"}
 
 
-def regroup_for_subtitles(result, max_chars: int = 72) -> None:
+def regroup_for_subtitles(result, max_chars: int = MAX_SEGMENT_CHARS) -> None:
     """Rebuild segments from word-level timestamps for subtitle display.
 
     Merges all segments, then re-splits using punctuation, speech gaps,
@@ -52,8 +57,10 @@ def regroup_for_subtitles(result, max_chars: int = 72) -> None:
     result.clamp_max()
 
 
-def _merge_short_trailing(result, max_chars: int) -> None:
-    """Merge ≤2-word trailing fragments into the previous segment.
+def _merge_short_trailing(
+    result, max_chars: int, max_trail_words: int = MAX_MERGE_TRAIL_WORDS
+) -> None:
+    """Merge short trailing fragments into the previous segment.
 
     Handles cases where split_by_length or split_by_duration creates short
     trailing fragments that complete the previous segment's sentence.
@@ -70,7 +77,7 @@ def _merge_short_trailing(result, max_chars: int) -> None:
         seg = segments[i]
         prev = segments[i - 1]
 
-        if len(seg.words) <= 2 and len(prev.words) >= 1:
+        if len(seg.words) <= max_trail_words and len(prev.words) >= 1:
             prev_text = prev.text.strip()
             seg_text = seg.text.strip()
             gap = seg.start - prev.end if hasattr(seg, "start") else 0.0
@@ -126,9 +133,9 @@ def postprocess_segments(
 def fix_dangling_function_words(result, language: str) -> None:
     """Move dangling function words from segment ends to the next segment.
 
-    Uses spaCy POS tagging to detect determiners (DET) and adpositions
-    (ADP) at segment boundaries.  Works for any language with a spaCy
-    model.  Falls back silently if spaCy is not installed.
+    Uses spaCy POS tagging to detect function words (DET, ADP, CCONJ,
+    SCONJ, AUX) at segment boundaries.  Works for any language with a
+    spaCy model.  Falls back silently if spaCy is not installed.
     """
     nlp = load_spacy_model(language)
     if nlp is None:
@@ -186,7 +193,7 @@ def fix_dangling_clitics(segments: list[SubtitleSegment], language: str) -> list
     Detects two patterns:
     1. Text ending with an apostrophe (Romance clitics: l', d', qu', etc.)
        — uses simple text check, handles spaCy splitting "l'" into ["l", "'"]
-    2. Trailing DET/ADP POS tags — uses spaCy
+    2. Trailing function word POS tags (DET, ADP, CCONJ, SCONJ, AUX) — uses spaCy
     """
     nlp = load_spacy_model(language)
     if nlp is None:

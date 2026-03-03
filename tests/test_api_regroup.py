@@ -67,10 +67,12 @@ class TestRegroupWords:
             {"word": "two", "start": 0.2, "end": 0.4},
             {"word": "three", "start": 0.4, "end": 0.6},
             {"word": "four,", "start": 0.6, "end": 0.8},
-            # Enough trailing words so the fragment isn't merged back
+            # Enough trailing words (5+) so the fragment isn't merged back
             {"word": "five", "start": 0.8, "end": 1.0},
             {"word": "six", "start": 1.0, "end": 1.2},
             {"word": "seven", "start": 1.2, "end": 1.4},
+            {"word": "eight", "start": 1.4, "end": 1.6},
+            {"word": "nine", "start": 1.6, "end": 1.8},
         ]
         segments = regroup_words(words)
         texts = [seg.text for seg in segments]
@@ -94,9 +96,12 @@ class TestRegroupWords:
             {"word": "two", "start": 1.0, "end": 2.0},
             {"word": "three", "start": 2.0, "end": 3.0},
             {"word": "four", "start": 3.0, "end": 6.0},  # 6s total, > 5
+            # 5+ trailing words so the fragment isn't merged back
             {"word": "five", "start": 6.0, "end": 7.0},
             {"word": "six", "start": 7.0, "end": 8.0},
             {"word": "seven", "start": 8.0, "end": 9.0},
+            {"word": "eight", "start": 9.0, "end": 10.0},
+            {"word": "nine", "start": 10.0, "end": 11.0},
         ]
         segments = regroup_words(words, max_dur=5.0)
         assert len(segments) >= 2

@@ -16,6 +16,9 @@ from pgw.utils.cache import cache_key, find_cached_file, get_cache_dir
 from pgw.utils.console import console
 from pgw.utils.text import (
     CLAUSE_PUNCT,
+    MAX_MERGE_LEAD_WORDS,
+    MAX_MERGE_TRAIL_WORDS,
+    MAX_SEGMENT_CHARS,
     MAX_SEGMENT_DURATION,
     MERGE_CHAR_SLACK,
     MERGE_GAP_THRESHOLD,
@@ -185,7 +188,7 @@ def response_to_segments(response) -> list[SubtitleSegment]:
 
 def regroup_words(
     words: list[dict],
-    max_chars: int = 72,
+    max_chars: int = MAX_SEGMENT_CHARS,
     max_dur: float = MAX_SEGMENT_DURATION,
 ) -> list[SubtitleSegment]:
     """Regroup word-level timestamps into subtitle-sized segments.
@@ -288,12 +291,14 @@ def regroup_words(
         prev_text = " ".join(w["text"] for w in prev)
         gap = group[0]["start"] - prev[-1]["end"]
         combined_text = " ".join(w["text"] for w in prev + group)
+        combined_dur = group[-1]["end"] - prev[0]["start"]
         if (
-            len(group) <= 2
+            len(group) <= MAX_MERGE_TRAIL_WORDS
             and gap < SPEECH_GAP_THRESHOLD
             and prev_text
             and prev_text[-1] not in SENTENCE_END_CHARS
             and len(combined_text) <= merge_limit
+            and combined_dur <= max_dur
         ):
             merged[-1].extend(group)
         else:
@@ -307,7 +312,7 @@ def regroup_words(
         gap = group[0]["start"] - prev[-1]["end"]
         combined_text = " ".join(w["text"] for w in prev + group)
         if (
-            len(prev) <= 2
+            len(prev) <= MAX_MERGE_LEAD_WORDS
             and gap < MERGE_GAP_THRESHOLD
             and len(prev) + len(group) <= 10
             and len(combined_text) <= merge_limit
