@@ -105,6 +105,23 @@ def process_chunk(
     if exact_match or len(texts) <= 2:
         return translated_texts
 
+    # --- Debug: dump raw response and source on mismatch ---
+    import os
+
+    if os.environ.get("PGW_DEBUG"):
+        console.print("[dim]--- DEBUG: source texts ---[/dim]")
+        for i, t in enumerate(texts):
+            console.print(f"[dim]  {i + 1}. {t}[/dim]")
+        console.print("[dim]--- DEBUG: raw LLM response ---[/dim]")
+        console.print(f"[dim]{response[:2000]}[/dim]")
+        # Also try JSON parse to show what was extracted
+        texts_j, exact_j = parse_json_response(response, len(texts))
+        texts_n, exact_n = parse_numbered_response(response, len(texts))
+        console.print(
+            f"[dim]JSON parse: {len(texts_j)} items (exact={exact_j}) | "
+            f"Numbered parse: {len(texts_n)} items (exact={exact_n})[/dim]"
+        )
+
     # --- Issue 5: Single retry before split ---
     if not _retried:
         parsed_count = sum(1 for t in translated_texts if t)
