@@ -59,6 +59,7 @@ class LLMConfig(BackendConfig):
 
 class DownloadConfig(BaseModel):
     format: str = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]"
+    subtitles: bool = True  # Download existing subtitles from video pages
 
 
 class PlayerConfig(BaseModel):

@@ -6,7 +6,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from pgw.utils.cache import cache_key, get_cache_dir, link_or_copy
+from pgw.utils.cache import cache_key, find_cached_file, get_cache_dir, link_or_copy
 
 
 def check_ffmpeg() -> bool:
@@ -98,11 +98,15 @@ def extract_audio_cached(
     sample_rate: int = 16000,
     start: str | None = None,
     duration: str | None = None,
+    content_hash: str | None = None,
 ) -> tuple[Path, bool]:
     """Extract audio with caching. Returns (path, cache_hit).
 
     Cache lives at <workspace_dir>/.cache/audio/. On hit, symlinks the
     cached file into the workspace. On miss, extracts to cache then symlinks.
+
+    Uses content-based keys when *content_hash* is available, falling back
+    to metadata-based keys for backward compatibility.
 
     Args:
         video_path: Path to the input video file.
@@ -111,25 +115,39 @@ def extract_audio_cached(
         sample_rate: Audio sample rate in Hz.
         start: Start time for clipping (ffmpeg format).
         duration: Duration to extract (ffmpeg format).
+        content_hash: SHA-256 of video content for content-addressable caching.
 
     Returns:
         Tuple of (audio_path, cache_hit).
     """
     cache_dir = get_cache_dir(workspace_dir, "audio")
-    key = cache_key(video_path, sample_rate=sample_rate, start=start, duration=duration)
-    cached_path = cache_dir / f"{key}.wav"
+    params = dict(sample_rate=sample_rate, start=start, duration=duration)
 
-    if cached_path.is_file():
+    # Dual-lookup: content-based key first, then metadata fallback
+    cached_path = find_cached_file(
+        cache_dir,
+        ".wav",
+        content_hash=content_hash,
+        file_path=video_path,
+        **params,
+    )
+    if cached_path is not None:
         link_or_copy(cached_path, output_path)
         return output_path, True
 
-    # Cache miss — extract to cache, then symlink
+    # Cache miss — determine key for the new entry
+    if content_hash:
+        key = cache_key(content_hash=content_hash, **params)
+    else:
+        key = cache_key(video_path, **params)
+    new_cached_path = cache_dir / f"{key}.wav"
+
     extract_audio(
         video_path,
-        output_path=cached_path,
+        output_path=new_cached_path,
         sample_rate=sample_rate,
         start=start,
         duration=duration,
     )
-    link_or_copy(cached_path, output_path)
+    link_or_copy(new_cached_path, output_path)
     return output_path, False

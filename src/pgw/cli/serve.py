@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import functools
+import html
 import http.server
+import json
 import mimetypes
 import urllib.parse
 import webbrowser
+from importlib.resources import files
 from pathlib import Path
 from typing import Annotated, Optional
 
@@ -15,68 +18,10 @@ import typer
 from pgw.utils.console import console
 from pgw.utils.paths import find_video
 
-PLAYER_HTML = """\
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{title} — PolyglotWhisperer</title>
-<style>
-  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-  body {{ background: #1a1a2e; color: #e0e0e0; font-family: system-ui, sans-serif; }}
-  .container {{ max-width: 960px; margin: 0 auto; padding: 20px; }}
-  h1 {{ font-size: 1.4rem; margin-bottom: 16px; color: #a0c4ff; }}
-  video {{
-    width: 100%; border-radius: 8px;
-    background: #000; box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-  }}
-  video::cue {{ font-size: 1.1rem; background: rgba(0,0,0,0.7); }}
-  .controls {{ margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; }}
-  .controls label {{
-    padding: 6px 14px; border-radius: 6px; cursor: pointer;
-    background: #16213e; border: 1px solid #334;
-    font-size: 0.85rem; transition: all 0.2s;
-  }}
-  .controls label:hover {{ background: #1a1a4e; }}
-  .controls input:checked + span {{ color: #a0c4ff; font-weight: 600; }}
-  .controls input {{ display: none; }}
-  .info {{ margin-top: 16px; font-size: 0.8rem; color: #888; }}
-</style>
-</head>
-<body>
-<div class="container">
-  <h1>{title}</h1>
-  <video id="player" controls autoplay>
-    <source src="/{video_filename}" type="{video_mime}">
-    {tracks}
-  </video>
-  <div class="controls" id="track-controls"></div>
-  <div class="info">
-    Served by <strong>pgw serve</strong> &mdash; press Ctrl+C to stop
-  </div>
-</div>
-<script>
-  const video = document.getElementById('player');
-  const controls = document.getElementById('track-controls');
-  const tracks = video.textTracks;
+GITHUB_URL = "https://github.com/RizhongLin/PolyglotWhisperer"
 
-  // Build toggle buttons for each track
-  for (let i = 0; i < tracks.length; i++) {{
-    const t = tracks[i];
-    const id = 'track-' + i;
-    const label = document.createElement('label');
-    label.innerHTML = `<input type="checkbox" id="${{id}}" checked><span>${{t.label}}</span>`;
-    label.querySelector('input').addEventListener('change', (e) => {{
-      t.mode = e.target.checked ? 'showing' : 'hidden';
-    }});
-    controls.appendChild(label);
-    t.mode = 'showing';
-  }}
-</script>
-</body>
-</html>
-"""
+_PLAYER_TEMPLATE = (files("pgw.templates") / "player.html").read_text(encoding="utf-8")
+_PLAYER_CSS = (files("pgw.templates") / "player.css").read_text(encoding="utf-8")
 
 
 def _discover_tracks(workspace: Path) -> list[dict[str, str]]:
@@ -118,10 +63,156 @@ _MIME_MAP = {
 }
 
 
+def _format_duration(seconds: float | None) -> str:
+    """Format seconds as H:MM:SS or M:SS."""
+    if not seconds:
+        return ""
+    total = int(seconds)
+    h, remainder = divmod(total, 3600)
+    m, s = divmod(remainder, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
+def _format_file_size(size_bytes: int) -> str:
+    """Format bytes as human-readable size."""
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    if size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.0f} KB"
+    return f"{size_bytes / (1024 * 1024):.1f} MB"
+
+
+def _load_metadata(workspace: Path) -> dict:
+    """Load metadata.json from workspace, return empty dict on failure."""
+    meta_path = workspace / "metadata.json"
+    if meta_path.is_file():
+        try:
+            return json.loads(meta_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def _build_metadata_rows(meta: dict) -> str:
+    """Build <dt>/<dd> pairs for the metadata card."""
+    rows = []
+
+    def add(icon: str, label: str, value: str) -> None:
+        if value:
+            rows.append(
+                f'<dt><i data-lucide="{icon}"></i> {html.escape(label)}</dt>' f"<dd>{value}</dd>"
+            )
+
+    lang = meta.get("language", "")
+    target = meta.get("target_language", "")
+    if lang and target:
+        add("languages", "Languages", f"{lang.upper()} &rarr; {target.upper()}")
+    elif lang:
+        add("languages", "Language", lang.upper())
+
+    dur = _format_duration(meta.get("source_duration"))
+    add("clock", "Duration", html.escape(dur))
+
+    whisper = html.escape(meta.get("whisper_model", ""))
+    if whisper:
+        add("mic", "Whisper", f"<code>{whisper}</code>")
+    llm = html.escape(meta.get("llm_model", ""))
+    if llm:
+        add("brain", "LLM", f"<code>{llm}</code>")
+
+    source_url = meta.get("source_url")
+    if source_url:
+        safe_url = html.escape(source_url)
+        try:
+            domain = urllib.parse.urlparse(source_url).netloc
+        except Exception:
+            domain = source_url
+        add(
+            "external-link",
+            "Source",
+            f'<a href="{safe_url}" target="_blank" rel="noopener"'
+            f' title="{safe_url}">{html.escape(domain)}</a>',
+        )
+
+    created = meta.get("created_at", "")
+    if created:
+        add("calendar", "Created", html.escape(created[:10]))
+
+    return "\n        ".join(rows)
+
+
+_FILE_ICONS = {
+    ".vtt": "captions",
+    ".srt": "captions",
+    ".txt": "file-text",
+    ".json": "file-json-2",
+    ".pdf": "file-text",
+    ".epub": "book-open",
+}
+
+
+def _file_icon(suffix: str) -> str:
+    """Return a Lucide icon name for a file extension."""
+    return _FILE_ICONS.get(suffix, "file")
+
+
+def _friendly_name(filename: str) -> str:
+    """Convert a workspace filename to a human-readable label."""
+    stem, _, ext = filename.rpartition(".")
+    parts = stem.split(".")
+    base = parts[0] if parts else stem
+    langs = parts[1] if len(parts) > 1 else ""
+    lang_display = langs.upper().replace("-", " \u2192 ") if langs else ""
+
+    names = {
+        "bilingual": "Bilingual Subtitles",
+        "transcription": "Original Transcription",
+        "translation": "Translation",
+        "parallel": "Parallel Text",
+        "vocabulary": "Vocabulary Analysis",
+    }
+    label = names.get(base, base.replace("_", " ").title())
+    if lang_display:
+        label += f" ({lang_display})"
+    return label
+
+
+def _build_download_rows(workspace: Path, meta: dict) -> str:
+    """Build <li> entries for downloadable workspace files."""
+    skip = {"metadata.json", "audio.wav"}
+    files_meta = meta.get("files", {})
+
+    rows = []
+    for f in sorted(workspace.iterdir()):
+        if f.name.startswith(".") or f.name in skip:
+            continue
+        if f.suffix.lower() in _MIME_MAP:
+            continue
+        if not f.is_file():
+            continue
+
+        size = files_meta.get(f.name, {}).get("size_bytes", f.stat().st_size)
+        size_str = _format_file_size(size)
+        safe_name = html.escape(f.name)
+        icon = _file_icon(f.suffix.lower())
+        label = html.escape(_friendly_name(f.name))
+        ext = f.suffix.lstrip(".").upper()
+        rows.append(
+            f'<li><a href="/{safe_name}" download>'
+            f'<i data-lucide="{icon}"></i>'
+            f'<span class="dl-name">{label}'
+            f'<span class="dl-ext">{ext}</span></span></a>'
+            f'<span class="size">{size_str}</span></li>'
+        )
+
+    return "\n        ".join(rows) if rows else "<li>No files available</li>"
+
+
 def _build_html(workspace: Path, video_path: Path) -> str:
     """Generate the player HTML for a workspace."""
     tracks = _discover_tracks(workspace)
-    title = workspace.parent.name  # slug directory name
+    meta = _load_metadata(workspace)
+    title = meta.get("title") or workspace.parent.name
 
     track_tags = []
     for i, t in enumerate(tracks):
@@ -135,11 +226,14 @@ def _build_html(workspace: Path, video_path: Path) -> str:
     video_filename = video_path.name
     video_mime = _MIME_MAP.get(video_path.suffix.lower(), "video/mp4")
 
-    return PLAYER_HTML.format(
-        title=title,
+    return _PLAYER_TEMPLATE.format(
+        title=html.escape(title),
         tracks="\n    ".join(track_tags),
         video_filename=video_filename,
         video_mime=video_mime,
+        metadata_rows=_build_metadata_rows(meta),
+        download_rows=_build_download_rows(workspace, meta),
+        github_url=GITHUB_URL,
     )
 
 
@@ -176,7 +270,7 @@ def serve(
     player_html = _build_html(workspace, video_path)
 
     handler_class = functools.partial(
-        _WorkspaceHandler, workspace=workspace, player_html=player_html
+        _WorkspaceHandler, workspace=workspace, player_html=player_html, player_css=_PLAYER_CSS
     )
     server = http.server.HTTPServer((host, port), handler_class)
 
@@ -204,24 +298,38 @@ def serve(
 class _WorkspaceHandler(http.server.BaseHTTPRequestHandler):
     """Serve workspace files and the player HTML."""
 
-    def __init__(self, *args, workspace: Path, player_html: str, **kwargs):
+    def __init__(self, *args, workspace: Path, player_html: str, player_css: str, **kwargs):
         self.workspace = workspace
         self.player_html = player_html
+        self.player_css = player_css
         super().__init__(*args, **kwargs)
 
     def do_GET(self) -> None:
-        parsed = urllib.parse.urlparse(self.path)
-        path = parsed.path.lstrip("/")
+        try:
+            parsed = urllib.parse.urlparse(self.path)
+            path = parsed.path.lstrip("/")
 
-        if path == "" or path == "index.html":
-            self._serve_html()
-        else:
-            self._serve_file(path)
+            if path == "" or path == "index.html":
+                self._serve_html()
+            elif path == "player.css":
+                self._serve_css()
+            else:
+                self._serve_file(path)
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # Browser aborted connection (normal during seeking)
 
     def _serve_html(self) -> None:
         content = self.player_html.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(content)))
+        self.end_headers()
+        self.wfile.write(content)
+
+    def _serve_css(self) -> None:
+        content = self.player_css.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/css; charset=utf-8")
         self.send_header("Content-Length", str(len(content)))
         self.end_headers()
         self.wfile.write(content)

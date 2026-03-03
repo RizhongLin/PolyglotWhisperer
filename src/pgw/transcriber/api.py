@@ -12,7 +12,7 @@ from pathlib import Path
 
 from pgw.core.config import WhisperConfig
 from pgw.core.models import SubtitleSegment
-from pgw.utils.cache import cache_key, get_cache_dir
+from pgw.utils.cache import cache_key, find_cached_file, get_cache_dir
 from pgw.utils.console import console
 from pgw.utils.text import (
     CLAUSE_PUNCT,
@@ -27,7 +27,10 @@ _MAX_FILE_SIZE = 25 * 1024 * 1024
 
 
 def transcribe(
-    audio_path: Path, config: WhisperConfig, workspace_dir: Path | None = None
+    audio_path: Path,
+    config: WhisperConfig,
+    workspace_dir: Path | None = None,
+    content_hash: str | None = None,
 ) -> list[SubtitleSegment]:
     """Transcribe audio via a cloud Whisper API.
 
@@ -51,7 +54,7 @@ def transcribe(
     audio_path = Path(audio_path)
     file_size = audio_path.stat().st_size
     if file_size > _MAX_FILE_SIZE:
-        audio_path = _compress_for_api(audio_path, workspace_dir)
+        audio_path = _compress_for_api(audio_path, workspace_dir, content_hash=content_hash)
 
     console.print(f"[bold]Transcribing via API:[/bold] {config.model}")
 
@@ -76,28 +79,45 @@ def transcribe(
     return segments
 
 
-def _compress_for_api(audio_path: Path, workspace_dir: Path | None = None) -> Path:
+def _compress_for_api(
+    audio_path: Path,
+    workspace_dir: Path | None = None,
+    content_hash: str | None = None,
+) -> Path:
     """Compress audio to MP3 to fit within the API upload limit.
 
     Uses the shared cache at .cache/compressed/ when workspace_dir is provided.
     Whisper APIs accept MP3, and the quality loss at 64kbps mono is
     negligible for speech recognition.
     """
-    # Check shared cache
+    # Check shared cache (content-based key first, metadata fallback)
+    params = dict(codec="mp3", bitrate="64k")
     if workspace_dir is not None:
-        key = cache_key(audio_path, codec="mp3", bitrate="64k")
         cache_dir = get_cache_dir(workspace_dir, "compressed")
-        cached_path = cache_dir / f"{key}.mp3"
-        if cached_path.is_file():
-            size_mb = cached_path.stat().st_size / (1024 * 1024)
+        hit = find_cached_file(
+            cache_dir,
+            ".mp3",
+            content_hash=content_hash,
+            file_path=audio_path,
+            **params,
+        )
+        if hit is not None:
+            size_mb = hit.stat().st_size / (1024 * 1024)
             console.print(f"[dim]Compressed audio found in cache ({size_mb:.1f} MB).[/dim]")
-            return cached_path
+            return hit
 
     size_mb = audio_path.stat().st_size / (1024 * 1024)
     console.print(f"[bold]Compressing audio:[/bold] {size_mb:.1f} MB WAV → MP3 for API upload")
 
-    # Compress to cache if available, otherwise to workspace
-    mp3_path = cached_path if workspace_dir is not None else audio_path.with_suffix(".api.mp3")
+    # Determine write path
+    if workspace_dir is not None:
+        if content_hash:
+            write_key = cache_key(content_hash=content_hash, **params)
+        else:
+            write_key = cache_key(audio_path, **params)
+        mp3_path = cache_dir / f"{write_key}.mp3"
+    else:
+        mp3_path = audio_path.with_suffix(".api.mp3")
     cmd = [
         "ffmpeg",
         "-i",

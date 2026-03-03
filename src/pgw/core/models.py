@@ -35,3 +35,6 @@ class VideoSource:
     source_url: str | None = None
     title: str = ""
     duration: float | None = None
+    content_hash: str | None = None
+    subtitle_path: Path | None = None  # Downloaded subtitle file (VTT/SRT)
+    subtitle_is_auto: bool = False  # True = auto-generated, False = human-made

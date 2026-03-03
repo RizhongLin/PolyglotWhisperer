@@ -49,6 +49,7 @@ def build_config_overrides(
     llm_backend: str | None = None,
     backend: str | None = None,
     translate: str | None = None,
+    no_subs: bool = False,
 ) -> dict[str, object]:
     """Build config override dict from CLI flags."""
     overrides: dict[str, object] = {
@@ -67,6 +68,8 @@ def build_config_overrides(
         overrides["whisper.backend"] = backend
     if translate is not None:
         overrides["llm.target_language"] = translate
+    if no_subs:
+        overrides["download.subtitles"] = False
     return overrides
 
 

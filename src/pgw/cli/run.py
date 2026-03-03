@@ -59,6 +59,10 @@ def run(
         Optional[str],
         typer.Option(help="Transcription backend: local or api."),
     ] = None,
+    no_subs: Annotated[
+        bool,
+        typer.Option("--no-subs", help="Skip downloading subtitles from video pages."),
+    ] = False,
 ) -> None:
     """Run the full pipeline: download, transcribe, translate, and play.
 
@@ -90,6 +94,7 @@ def run(
         llm_backend=llm_backend,
         backend=backend,
         translate=translate,
+        no_subs=no_subs,
     )
     config = load_config(**overrides)
 

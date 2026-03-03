@@ -1,8 +1,13 @@
 """Shared media cache for PolyglotWhisperer.
 
-Hash-based cache at <workspace_dir>/.cache/ for extracted or processed
-media files. Cache hits are symlinked into workspace directories to
-avoid redundant work across runs.
+Content-addressable cache at <workspace_dir>/.cache/ for extracted or
+processed media files. Cache hits are symlinked into workspace directories
+to avoid redundant work across runs.
+
+When a content hash (SHA-256) is available, cache keys are derived from
+the file content — so re-downloading the same video produces the same
+cache key. Falls back to metadata-based keys (path + size + mtime) when
+no content hash is available.
 """
 
 from __future__ import annotations
@@ -13,22 +18,92 @@ import shutil
 from pathlib import Path
 
 
-def cache_key(file_path: Path, **params: object) -> str:
-    """Compute a cache key from file metadata and parameters.
+def file_hash(file_path: Path) -> str:
+    """Compute SHA-256 hash of file contents.
 
-    Uses resolved path, size, and mtime — no file content reading.
-    Extra keyword arguments (sample_rate, start, duration, etc.) are
-    included in the hash.
+    Reads in 1 MB chunks to handle large files efficiently.
+
+    Returns:
+        Full 64-char hex SHA-256 digest.
+    """
+    h = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def cache_key(
+    file_path: Path | None = None,
+    *,
+    content_hash: str | None = None,
+    **params: object,
+) -> str:
+    """Compute a cache key from content hash or file metadata.
+
+    When *content_hash* is provided the key is content-addressable:
+    same content produces the same key regardless of path or mtime.
+    Falls back to metadata-based keying (path + size + mtime) when
+    no hash is available.
+
+    Args:
+        file_path: Path for metadata-based key (legacy fallback).
+        content_hash: SHA-256 content hash for content-addressable key.
+        **params: Extra parameters (sample_rate, model, backend, …).
 
     Returns:
         16-char hex string.
     """
-    resolved = file_path.resolve()
-    stat = resolved.stat()
-    parts = f"{resolved}|{stat.st_size}|{stat.st_mtime_ns}"
+    if content_hash:
+        base = content_hash
+    elif file_path is not None:
+        resolved = file_path.resolve()
+        stat = resolved.stat()
+        base = f"{resolved}|{stat.st_size}|{stat.st_mtime_ns}"
+    else:
+        raise ValueError("Either file_path or content_hash must be provided")
+
     for k, v in sorted(params.items()):
-        parts += f"|{k}={v}"
-    return hashlib.sha256(parts.encode()).hexdigest()[:16]
+        base += f"|{k}={v}"
+    return hashlib.sha256(base.encode()).hexdigest()[:16]
+
+
+def find_cached_file(
+    cache_dir: Path,
+    suffix: str,
+    *,
+    content_hash: str | None = None,
+    file_path: Path | None = None,
+    **params: object,
+) -> Path | None:
+    """Look up a cached file, trying content-based key first, then metadata fallback.
+
+    Args:
+        cache_dir: Directory containing cached files.
+        suffix: File extension including dot (e.g. ".wav", ".json").
+        content_hash: Content hash for content-addressable lookup.
+        file_path: File path for metadata-based fallback lookup.
+        **params: Additional cache key parameters.
+
+    Returns:
+        Path to cached file if found, None otherwise.
+    """
+    if content_hash:
+        key = cache_key(content_hash=content_hash, **params)
+        cached = cache_dir / f"{key}{suffix}"
+        if cached.is_file():
+            return cached
+
+    if file_path is not None:
+        try:
+            meta_key = cache_key(file_path=file_path, **params)
+            cached = cache_dir / f"{meta_key}{suffix}"
+            if cached.is_file():
+                return cached
+        except OSError:
+            pass  # File may not exist for metadata stat
+
+    return None
 
 
 def get_cache_dir(workspace_dir: Path, category: str) -> Path:

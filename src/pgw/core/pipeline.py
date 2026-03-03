@@ -10,7 +10,7 @@ from pgw.core.config import PGWConfig
 from pgw.core.events import EventCallback, PipelineEvent
 from pgw.downloader.resolver import is_url, resolve
 from pgw.utils.audio import extract_audio_cached
-from pgw.utils.cache import cache_key, get_cache_dir, link_or_copy
+from pgw.utils.cache import cache_key, find_cached_file, get_cache_dir, link_or_copy
 from pgw.utils.console import console
 from pgw.utils.paths import create_workspace, save_metadata, workspace_paths
 
@@ -49,18 +49,17 @@ def run_pipeline(
     segments: list | None = None
     trans_result = None
 
-    # Step 1: Resolve input
+    # Step 1: Resolve input (always goes through resolve() for content_hash)
     emit("download", 0.0, f"Resolving input: {input_path}")
     if is_url(input_path):
         console.print(f"[bold]Downloading:[/bold] {input_path}")
-        source = resolve(input_path, output_dir=config.download_dir, fmt=config.download.format)
-    else:
-        from pgw.core.models import VideoSource
-
-        path = Path(input_path)
-        if not path.is_file():
-            raise FileNotFoundError(f"File not found: {input_path}")
-        source = VideoSource(video_path=path, title=path.stem)
+    sub_language = language if config.download.subtitles else None
+    source = resolve(
+        input_path,
+        output_dir=config.download_dir,
+        fmt=config.download.format,
+        language=sub_language,
+    )
     emit("download", 1.0, "Input resolved")
 
     # Step 2: Create workspace
@@ -94,6 +93,7 @@ def run_pipeline(
             workspace_dir=config.workspace_dir,
             start=start,
             duration=duration,
+            content_hash=source.content_hash,
         )
         if cache_hit:
             console.print("[dim]Audio found in cache.[/dim]")
@@ -101,23 +101,60 @@ def run_pipeline(
         console.print("[dim]Audio already extracted, skipping.[/dim]")
     emit("audio", 1.0, "Audio ready")
 
-    # Step 4: Transcribe (with shared cache)
+    # Step 3.5: Use downloaded subtitles if available (skip Whisper)
     vtt_path = paths["transcription_vtt"]
     txt_path = paths["transcription_txt"]
+    if source.subtitle_path and not vtt_path.is_file():
+        from pgw.subtitles.converter import load_subtitles, save_subtitles
+        from pgw.transcriber.postprocess import postprocess_segments
+
+        emit("transcribe", 0.0, "Loading downloaded subtitles...")
+        kind = "auto-generated" if source.subtitle_is_auto else "human-made"
+        console.print(f"[bold]Using downloaded subtitles[/bold] ({kind}, skipping Whisper)")
+        segments = load_subtitles(source.subtitle_path)
+        segments = postprocess_segments(segments, language)
+        save_subtitles(segments, vtt_path, fmt="vtt")
+        console.print(f"[green]Saved:[/green] {vtt_path}")
+        save_subtitles(segments, txt_path, fmt="txt")
+        console.print(f"[green]Saved:[/green] {txt_path}")
+        emit("transcribe", 1.0, "Downloaded subtitles ready")
+
+    # Step 4: Transcribe (with shared cache)
     needs_llm = (cleanup and config.llm.cleanup_enabled) or translate
     llm_was_used = False
     use_api = config.whisper.backend == "api"
 
     # Shared transcription cache: .cache/transcriptions/<hash>.json
+    # Derive audio identity from video content hash + extraction params
+    audio_identity = None
+    if source.content_hash:
+        audio_identity = cache_key(
+            content_hash=source.content_hash,
+            sample_rate=16000,
+            start=start,
+            duration=duration,
+        )
+
     trans_cache_dir = get_cache_dir(config.workspace_dir, "transcriptions")
-    trans_cache_key = cache_key(
-        audio_path, model=config.whisper.model, backend=config.whisper.backend
+    trans_params = dict(model=config.whisper.model, backend=config.whisper.backend)
+    trans_cache_path = find_cached_file(
+        trans_cache_dir,
+        ".json",
+        content_hash=audio_identity,
+        file_path=audio_path,
+        **trans_params,
     )
-    trans_cache_path = trans_cache_dir / f"{trans_cache_key}.json"
+
+    # Determine write path for new cache entries (prefer content-based key)
+    if audio_identity:
+        trans_write_key = cache_key(content_hash=audio_identity, **trans_params)
+    else:
+        trans_write_key = cache_key(audio_path, **trans_params)
+    trans_write_path = trans_cache_dir / f"{trans_write_key}.json"
 
     emit("transcribe", 0.0, "Transcribing...")
     if not vtt_path.is_file():
-        if use_api and trans_cache_path.is_file():
+        if use_api and trans_cache_path is not None:
             # Cache hit: load API segments from shared cache
             console.print("[dim]Transcription found in cache, loading...[/dim]")
             from pgw.core.models import SubtitleSegment
@@ -129,16 +166,21 @@ def run_pipeline(
             # API transcription — returns segments directly, no WhisperResult
             from pgw.transcriber.api import transcribe as api_transcribe
 
-            segments = api_transcribe(audio_path, config.whisper, config.workspace_dir)
+            segments = api_transcribe(
+                audio_path,
+                config.whisper,
+                config.workspace_dir,
+                content_hash=audio_identity,
+            )
 
             # Save to shared cache
             raw = [{"text": s.text, "start": s.start, "end": s.end} for s in segments]
-            trans_cache_path.write_text(
+            trans_write_path.write_text(
                 json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8"
             )
             console.print("[dim]Transcription cached.[/dim]")
 
-        elif trans_cache_path.is_file() and needs_llm:
+        elif trans_cache_path is not None and needs_llm:
             # Cache hit: load local transcription from shared cache
             console.print("[dim]Transcription found in cache, loading...[/dim]")
             import stable_whisper
@@ -154,7 +196,7 @@ def run_pipeline(
             result = transcribe(audio_path, config.whisper)
 
             # Save full result to shared cache
-            result.save_as_json(str(trans_cache_path))
+            result.save_as_json(str(trans_write_path))
             console.print("[dim]Transcription cached.[/dim]")
 
             if needs_llm:

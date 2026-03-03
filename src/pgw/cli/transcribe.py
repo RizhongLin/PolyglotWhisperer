@@ -67,6 +67,10 @@ def transcribe(
         Optional[str],
         typer.Option(help="Transcription backend: local or api."),
     ] = None,
+    no_subs: Annotated[
+        bool,
+        typer.Option("--no-subs", help="Skip downloading subtitles from video pages."),
+    ] = False,
 ) -> None:
     """Transcribe video/audio files (or URLs) to subtitles with word-level timestamps.
 
@@ -88,6 +92,7 @@ def transcribe(
         llm_model=llm_model,
         llm_backend=llm_backend,
         backend=backend,
+        no_subs=no_subs,
     )
     config = load_config(**overrides)
 
@@ -155,9 +160,16 @@ def _transcribe_single(
 ) -> None:
     """Transcribe a single input file or URL."""
     # Resolve input: URL → download, local path → use directly
+    source = None
     if is_url(input_path):
         console.print(f"[bold]Downloading:[/bold] {input_path}")
-        source = resolve(input_path, output_dir=config.download_dir, fmt=config.download.format)
+        sub_language = language if config.download.subtitles else None
+        source = resolve(
+            input_path,
+            output_dir=config.download_dir,
+            fmt=config.download.format,
+            language=sub_language,
+        )
         video_path = source.video_path
     else:
         video_path = Path(input_path)
@@ -177,6 +189,32 @@ def _transcribe_single(
         sub_path = output
     else:
         sub_path = video_path.with_suffix(f".{language}.{fmt}")
+
+    # Use downloaded subtitles if available (skip Whisper)
+    if source and source.subtitle_path:
+        from pgw.subtitles.converter import load_subtitles, save_subtitles
+        from pgw.transcriber.postprocess import postprocess_segments
+
+        kind = "auto-generated" if source.subtitle_is_auto else "human-made"
+        console.print(f"[bold]Using downloaded subtitles[/bold] ({kind}, skipping Whisper)")
+        segments = load_subtitles(source.subtitle_path)
+        segments = postprocess_segments(segments, language)
+
+        if cleanup:
+            from pgw.llm.cleanup import cleanup_subtitles
+
+            console.print("[bold]Cleaning up with LLM...[/bold]")
+            segments = cleanup_subtitles(segments, language, config.llm)
+
+        save_subtitles(segments, sub_path, fmt=fmt)
+        console.print(f"[green]Saved:[/green] {sub_path}")
+
+        if save_txt:
+            txt_path = sub_path.with_suffix(".txt")
+            if txt_path != sub_path:
+                save_subtitles(segments, txt_path, fmt="txt")
+                console.print(f"[green]Saved:[/green] {txt_path}")
+        return
 
     use_api = config.whisper.backend == "api"
 

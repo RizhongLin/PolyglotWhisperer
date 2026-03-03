@@ -5,15 +5,14 @@ Video transcription and translation CLI for language learners. Transcribe with W
 ## Features
 
 - **Whisper transcription** with word-level timestamps — local (stable-ts, MLX/CUDA/CPU) or cloud API (Groq, OpenAI via LiteLLM)
-- **Smart subtitle segmentation** — spaCy POS tagging fixes dangling articles, prepositions, and Romance clitics (l', d', qu') across 26 language codes
-- **LLM translation** — any language via Ollama (local) or cloud LLMs (OpenAI, Groq, Claude, etc.)
+- **Smart subtitle segmentation** — spaCy POS tagging fixes dangling articles, prepositions, and Romance clitics (l', d', qu') across 26 languages
+- **Subtitle download** — grabs existing subtitles from YouTube/etc. via yt-dlp (human-made preferred), skips Whisper when available
+- **LLM translation** — any language pair via Ollama (local) or cloud LLMs (Groq, OpenAI, Claude, etc.)
 - **Vocabulary analysis** — CEFR difficulty estimation (A1–C2), rare word extraction with context and translations
-- **Parallel text export** — side-by-side PDF/EPUB for printing or e-readers
+- **Dual playback** — original + translation subtitles in mpv, or browser-based web player (`pgw serve`)
 - **Batch processing** — multiple files, glob patterns, URL lists, with error-continue
-- **Dual subtitle playback** — original + translation simultaneously in mpv
-- **Audio cache** — shared across workspaces, avoids redundant ffmpeg extraction
-- **Multiple formats** — VTT, SRT, ASS, plain text, bilingual VTT, parallel PDF/EPUB
-- **URL support** — YouTube and other sites via yt-dlp
+- **Export** — VTT, SRT, ASS, plain text, bilingual VTT, side-by-side PDF/EPUB
+- **Shared cache** — deduplicates downloads, audio extraction, and transcriptions across workspaces
 
 ## Quick Start
 
@@ -87,6 +86,9 @@ pgw run "https://example.com/video" --translate en --no-play
 # Cloud API transcription + translation (no local GPU needed)
 pgw run "https://example.com/video" --backend api --llm-backend api --translate en --no-play
 
+# Skip downloading existing subtitles (always use Whisper)
+pgw run "https://example.com/video" --no-subs --translate en --no-play
+
 # Batch processing
 pgw run *.mp4 --translate en --no-play
 pgw run urls.txt --backend api --translate en --no-play
@@ -134,18 +136,19 @@ pgw_workspace/
 │   ├── audio/                        # Extracted audio
 │   ├── compressed/                   # API-compressed MP3s
 │   ├── transcriptions/               # Whisper results (local + API)
-│   └── downloads/                    # yt-dlp downloads
+│   └── downloads/                    # yt-dlp downloads + subtitles
 └── my-video/
     └── 20260217_164802/
         ├── video.mp4                 # Symlinked from source
         ├── audio.wav                 # Symlinked from cache
-        ├── transcription.fr.vtt      # Original subtitles
+        ├── transcription.fr.vtt      # Original subtitles (from Whisper or downloaded)
         ├── transcription.fr.txt      # Plain text
         ├── translation.en.vtt        # Translated subtitles
+        ├── translation.en.txt        # Translation plain text
         ├── bilingual.fr-en.vtt       # Dual-language VTT
         ├── parallel.fr-en.pdf        # Side-by-side PDF
+        ├── parallel.fr-en.epub       # Side-by-side EPUB
         ├── vocabulary.fr.json        # CEFR analysis + rare words
-        ├── transcription.json        # Full Whisper result (local backend)
         └── metadata.json
 ```
 
@@ -178,12 +181,12 @@ pgw vocab pgw_workspace/my-video/20260217_164802/ --top 50
 
 ```plaintext
 Video/Audio/URL
-  → Download (yt-dlp, cached)
+  → Download (yt-dlp, cached) + fetch existing subtitles
   → Extract Audio (ffmpeg, cached)
-  → Transcribe (local Whisper or cloud API + spaCy segmentation)
+  → Use downloaded subtitles OR Transcribe (Whisper + spaCy segmentation)
   → Translate (LLM, optional)
   → Export (VTT/TXT/bilingual VTT/PDF/EPUB) + Vocabulary Analysis
-  → Play (mpv dual subtitles)
+  → Play (mpv or web player)
 ```
 
 ## Tech Stack
@@ -225,6 +228,7 @@ Whisper supports **100 languages** — run `pgw languages` for the full list. sp
 - [x] spaCy subtitle segmentation + Romance clitic handling (26 language codes)
 - [x] Audio cache, batch processing, vocabulary analysis, parallel text export
 - [x] Streaming pipeline event system
+- [x] Subtitle download from video pages, web player, content-addressable cache
 - [ ] Hosted demo (Gradio on Hugging Face Spaces)
 - [ ] Speaker diarization
 - [ ] Anki card generation from subtitle pairs

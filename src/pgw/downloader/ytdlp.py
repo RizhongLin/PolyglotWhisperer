@@ -2,17 +2,28 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 
 from rich.progress import BarColumn, Progress, TaskID, TextColumn, TimeRemainingColumn
 
 from pgw.core.models import VideoSource
+from pgw.utils.cache import file_hash
 from pgw.utils.console import console
 
 _DEFAULT_FORMAT = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
 _MANIFEST_NAME = ".downloads.jsonl"
+_SUBTITLE_EXTS = (".vtt", ".srt", ".ass", ".ssa", ".ttml")
+
+# Language code aliases: our ISO 639-1 codes → alternatives used by YouTube/yt-dlp
+_LANG_ALIASES: dict[str, list[str]] = {
+    "he": ["iw"],
+    "iw": ["he"],
+    "jw": ["jv"],
+    "jv": ["jw"],
+    "no": ["nb"],
+    "nb": ["no"],
+}
 
 
 def _make_progress() -> Progress:
@@ -23,15 +34,6 @@ def _make_progress() -> Progress:
         TimeRemainingColumn(),
         console=console,
     )
-
-
-def _sha256(path: Path) -> str:
-    """Compute SHA-256 hash of a file."""
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def _load_manifest(output_dir: Path) -> list[dict]:
@@ -58,7 +60,81 @@ def _append_manifest(output_dir: Path, entry: dict) -> None:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
-def _find_cached(url: str, output_dir: Path) -> VideoSource | None:
+def _find_subtitle_file(video_path: Path, language: str) -> tuple[Path | None, bool]:
+    """Find a previously downloaded subtitle file alongside a video.
+
+    Checks for files matching {video_stem}.{lang}.{ext} patterns,
+    including regional variants (e.g. zh-Hans for zh).
+
+    Returns:
+        (subtitle_path, is_auto) — is_auto defaults to False for file-based
+        detection since we can't determine origin from the filename.
+    """
+    stem = video_path.stem
+    parent = video_path.parent
+
+    candidates = [language] + _LANG_ALIASES.get(language, [])
+
+    for lang in candidates:
+        for ext in _SUBTITLE_EXTS:
+            # Exact match: Title_ID.en.vtt
+            path = parent / f"{stem}.{lang}{ext}"
+            if path.is_file():
+                return path, False
+            # Regional variants: Title_ID.zh-Hans.vtt, Title_ID.pt-BR.srt
+            for p in parent.glob(f"{stem}.{lang}-*{ext}"):
+                if p.is_file():
+                    return p, False
+            for p in parent.glob(f"{stem}.{lang}_*{ext}"):
+                if p.is_file():
+                    return p, False
+
+    return None, False
+
+
+def _extract_subtitle_info(info: dict, video_path: Path, language: str) -> tuple[Path | None, bool]:
+    """Extract downloaded subtitle path and type from yt-dlp info dict.
+
+    Inspects ``info["requested_subtitles"]`` for downloaded files.
+    Prefers exact language match and human-made over auto-generated.
+
+    Returns:
+        (subtitle_path, is_auto) or (None, False) if nothing found.
+    """
+    requested = info.get("requested_subtitles") or {}
+    human_subs = info.get("subtitles") or {}
+
+    if not requested:
+        return None, False
+
+    best_path: Path | None = None
+    best_is_auto = True
+    best_is_exact = False
+
+    for key, sub_info in requested.items():
+        filepath = sub_info.get("filepath")
+        if not filepath:
+            continue
+        path = Path(filepath)
+        if not path.is_file():
+            continue
+
+        is_auto = key not in human_subs
+        is_exact = key == language
+
+        if (
+            best_path is None
+            or (is_exact and not best_is_exact)
+            or (not best_is_exact and not is_auto and best_is_auto)
+        ):
+            best_path = path
+            best_is_auto = is_auto
+            best_is_exact = is_exact
+
+    return best_path, best_is_auto
+
+
+def _find_cached(url: str, output_dir: Path, language: str | None = None) -> VideoSource | None:
     """Check if a URL has already been downloaded and the file is intact."""
     for entry in _load_manifest(output_dir):
         if entry.get("url") != url:
@@ -76,15 +152,25 @@ def _find_cached(url: str, output_dir: Path) -> VideoSource | None:
             continue
         # Full hash verification only if size matches
         expected_hash = entry.get("sha256")
-        if expected_hash and _sha256(cached_path) != expected_hash:
+        if expected_hash and file_hash(cached_path) != expected_hash:
             console.print(f"[yellow]Cache stale (hash mismatch):[/yellow] {cached_path}")
             continue
         console.print(f"[dim]Found cached download:[/dim] {cached_path}")
+        # Check for previously downloaded subtitle files
+        subtitle_path = None
+        subtitle_is_auto = False
+        if language:
+            subtitle_path, subtitle_is_auto = _find_subtitle_file(cached_path, language)
+            if subtitle_path:
+                console.print(f"[dim]Found cached subtitles:[/dim] {subtitle_path.name}")
         return VideoSource(
             video_path=cached_path,
             source_url=url,
             title=entry.get("title", cached_path.stem),
             duration=entry.get("duration"),
+            content_hash=expected_hash,
+            subtitle_path=subtitle_path,
+            subtitle_is_auto=subtitle_is_auto,
         )
     return None
 
@@ -93,6 +179,7 @@ def download(
     url: str,
     output_dir: Path | None = None,
     fmt: str = _DEFAULT_FORMAT,
+    language: str | None = None,
 ) -> VideoSource:
     """Download a video from URL using yt-dlp.
 
@@ -100,13 +187,17 @@ def download(
     Uses single-pass extract_info(download=True) and yt-dlp's
     prepare_filename for exact output path resolution.
 
+    When *language* is provided, also downloads existing subtitles from
+    the video page (human-made preferred, auto-generated as fallback).
+
     Args:
         url: Video URL.
         output_dir: Directory to save the file. Defaults to ./downloads.
         fmt: yt-dlp format string.
+        language: Source language code for subtitle download (e.g. "en", "fr").
 
     Returns:
-        VideoSource with local video path and metadata.
+        VideoSource with local video path, metadata, and optional subtitle path.
     """
     try:
         import yt_dlp
@@ -119,7 +210,7 @@ def download(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Check cache first
-    cached = _find_cached(url, output_dir)
+    cached = _find_cached(url, output_dir, language=language)
     if cached is not None:
         return cached
 
@@ -146,6 +237,21 @@ def download(
         "quiet": True,
         "no_warnings": True,
     }
+
+    # Add subtitle download options (regex patterns catch regional variants)
+    if language:
+        sub_langs = [language]
+        sub_langs.extend(_LANG_ALIASES.get(language, []))
+        sub_langs.append(f"{language}-.*")
+        sub_langs.append(f"{language}_.*")
+        opts.update(
+            {
+                "writesubtitles": True,
+                "writeautomaticsub": True,
+                "subtitleslangs": sub_langs,
+                "subtitlesformat": "vtt/srt/ass",
+            }
+        )
 
     console.print(f"[bold]Downloading:[/bold] {url}")
 
@@ -176,7 +282,7 @@ def download(
 
     # Compute hash and save to manifest
     console.print("[dim]Computing file hash...[/dim]")
-    file_hash = _sha256(video_path)
+    content_sha = file_hash(video_path)
     from datetime import datetime, timezone
 
     _append_manifest(
@@ -185,16 +291,31 @@ def download(
             "url": url,
             "title": title,
             "path": str(video_path),
-            "sha256": file_hash,
+            "sha256": content_sha,
             "size_bytes": video_path.stat().st_size,
             "duration": duration,
             "downloaded_at": datetime.now(timezone.utc).isoformat(),
         },
     )
 
+    # Check for downloaded subtitles
+    subtitle_path = None
+    subtitle_is_auto = False
+    if language:
+        subtitle_path, subtitle_is_auto = _extract_subtitle_info(info, video_path, language)
+        # Fallback: glob for subtitle files (some extractors don't set filepath)
+        if subtitle_path is None:
+            subtitle_path, subtitle_is_auto = _find_subtitle_file(video_path, language)
+        if subtitle_path:
+            kind = "auto-generated" if subtitle_is_auto else "human-made"
+            console.print(f"[green]Found {kind} subtitles ({language})[/green]")
+
     return VideoSource(
         video_path=video_path,
         source_url=url,
         title=title,
         duration=duration,
+        content_hash=content_sha,
+        subtitle_path=subtitle_path,
+        subtitle_is_auto=subtitle_is_auto,
     )
