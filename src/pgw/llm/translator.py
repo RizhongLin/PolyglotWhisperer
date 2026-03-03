@@ -109,18 +109,19 @@ def process_chunk(
     import os
 
     if os.environ.get("PGW_DEBUG"):
-        console.print("[dim]--- DEBUG: source texts ---[/dim]")
-        for i, t in enumerate(texts):
-            console.print(f"[dim]  {i + 1}. {t}[/dim]")
+        import json as _json
+
+        console.print("[dim]--- DEBUG: source JSON ---[/dim]")
+        console.print(f"[dim]{json_segments}[/dim]")
         console.print("[dim]--- DEBUG: raw LLM response ---[/dim]")
-        console.print(f"[dim]{response[:2000]}[/dim]")
-        # Also try JSON parse to show what was extracted
-        texts_j, exact_j = parse_json_response(response, len(texts))
-        texts_n, exact_n = parse_numbered_response(response, len(texts))
-        console.print(
-            f"[dim]JSON parse: {len(texts_j)} items (exact={exact_j}) | "
-            f"Numbered parse: {len(texts_n)} items (exact={exact_n})[/dim]"
-        )
+        console.print(f"[dim]{response}[/dim]")
+        # Show raw key count from response
+        try:
+            raw = _json.loads(response.strip())
+            if isinstance(raw, dict):
+                console.print(f"[dim]Raw keys: {len(raw)} (expected {len(texts)})[/dim]")
+        except (ValueError, _json.JSONDecodeError):
+            console.print("[dim]Failed to parse response as JSON[/dim]")
 
     # --- Issue 5: Single retry before split ---
     if not _retried:
