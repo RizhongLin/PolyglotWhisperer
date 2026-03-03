@@ -17,7 +17,8 @@ dependencies = [
 
 [project.optional-dependencies]
 transcribe = [
-    "stable-ts[mlx]>=2.16",
+    "stable-ts>=2.16; sys_platform != 'darwin'",
+    "stable-ts[mlx]>=2.16; sys_platform == 'darwin'",
     "setuptools",
 ]
 download = [

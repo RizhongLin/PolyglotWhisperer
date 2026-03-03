@@ -193,12 +193,14 @@ def _transcribe_single(
     # Use downloaded subtitles if available (skip Whisper)
     if source and source.subtitle_path:
         from pgw.subtitles.converter import load_subtitles, save_subtitles
-        from pgw.transcriber.postprocess import postprocess_segments
 
         kind = "auto-generated" if source.subtitle_is_auto else "human-made"
         console.print(f"[bold]Using downloaded subtitles[/bold] ({kind}, skipping Whisper)")
         segments = load_subtitles(source.subtitle_path)
-        segments = postprocess_segments(segments, language)
+        if source.subtitle_is_auto:
+            from pgw.transcriber.postprocess import postprocess_segments
+
+            segments = postprocess_segments(segments, language)
 
         if cleanup:
             from pgw.llm.cleanup import cleanup_subtitles

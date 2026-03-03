@@ -106,13 +106,16 @@ def run_pipeline(
     txt_path = paths["transcription_txt"]
     if source.subtitle_path and not vtt_path.is_file():
         from pgw.subtitles.converter import load_subtitles, save_subtitles
-        from pgw.transcriber.postprocess import postprocess_segments
 
         emit("transcribe", 0.0, "Loading downloaded subtitles...")
         kind = "auto-generated" if source.subtitle_is_auto else "human-made"
         console.print(f"[bold]Using downloaded subtitles[/bold] ({kind}, skipping Whisper)")
         segments = load_subtitles(source.subtitle_path)
-        segments = postprocess_segments(segments, language)
+        # Only postprocess auto-generated subs; human-made are already well-segmented
+        if source.subtitle_is_auto:
+            from pgw.transcriber.postprocess import postprocess_segments
+
+            segments = postprocess_segments(segments, language)
         save_subtitles(segments, vtt_path, fmt="vtt")
         console.print(f"[green]Saved:[/green] {vtt_path}")
         save_subtitles(segments, txt_path, fmt="txt")
