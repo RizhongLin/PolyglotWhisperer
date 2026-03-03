@@ -104,19 +104,20 @@ def format_history_context(
     source_texts: list[str],
     translated_texts: list[str],
 ) -> str:
-    """Format previously translated pairs as reference context.
+    """Format previously translated pairs as JSON reference context.
 
     Provides the LLM with its own recent translation style and terminology
     to maintain consistency across batches.
     """
     if not source_texts or not translated_texts:
         return ""
-    pairs = []
-    for src, tgt in zip(source_texts, translated_texts):
-        pairs.append(f"  {src} → {tgt}")
+    pairs = [
+        {" ".join(src.split()): " ".join(tgt.split())}
+        for src, tgt in zip(source_texts, translated_texts)
+    ]
     return (
         "Previous translations for style reference (do NOT re-translate these):\n"
-        + "\n".join(pairs)
+        + json.dumps(pairs, ensure_ascii=False)
         + "\n\n"
     )
 
@@ -234,14 +235,15 @@ def format_bilingual_context(
     translated_texts: list[str],
     label: str = "preceding",
 ) -> str:
-    """Format bilingual pairs as overlap context.
+    """Format bilingual pairs as JSON overlap context.
 
     Shows how preceding/following segments were translated, giving
     the LLM concrete examples of boundary translations.
     """
     if not source_texts:
         return ""
-    parts = []
-    for src, tgt in zip(source_texts, translated_texts):
-        parts.append(f"[{label}] {src} -> {tgt}")
-    return "\n".join(parts)
+    pairs = {
+        " ".join(src.split()): " ".join(tgt.split())
+        for src, tgt in zip(source_texts, translated_texts)
+    }
+    return f"{label}: " + json.dumps(pairs, ensure_ascii=False)

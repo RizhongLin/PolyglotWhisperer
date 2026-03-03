@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Callable
 
@@ -109,18 +110,16 @@ def process_chunk(
     import os
 
     if os.environ.get("PGW_DEBUG"):
-        import json as _json
-
         console.print("[dim]--- DEBUG: source JSON ---[/dim]")
         console.print(f"[dim]{json_segments}[/dim]")
         console.print("[dim]--- DEBUG: raw LLM response ---[/dim]")
         console.print(f"[dim]{response}[/dim]")
         # Show raw key count from response
         try:
-            raw = _json.loads(response.strip())
+            raw = json.loads(response.strip())
             if isinstance(raw, dict):
                 console.print(f"[dim]Raw keys: {len(raw)} (expected {len(texts)})[/dim]")
-        except (ValueError, _json.JSONDecodeError):
+        except (ValueError, json.JSONDecodeError):
             console.print("[dim]Failed to parse response as JSON[/dim]")
 
     # --- Issue 5: Single retry before split ---
@@ -338,7 +337,10 @@ def translate_subtitles(
             follow_end = min(follow_start + OVERLAP, len(segments))
             if follow_start < follow_end:
                 following = segments[follow_start:follow_end]
-                overlap_parts.append("\n".join(f"[following] {seg.text}" for seg in following))
+                following_texts = [" ".join(seg.text.split()) for seg in following]
+                overlap_parts.append(
+                    "following: " + json.dumps(following_texts, ensure_ascii=False)
+                )
 
             if overlap_parts:
                 context_parts.append(
