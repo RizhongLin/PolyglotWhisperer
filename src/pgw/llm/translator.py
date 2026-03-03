@@ -15,7 +15,7 @@ from pgw.llm.prompts import (
     filter_empty_segments,
     format_bilingual_context,
     format_history_context,
-    format_numbered_segments,
+    format_json_segments,
     parse_json_response,
     parse_numbered_response,
     reconstruct_with_empties,
@@ -83,7 +83,7 @@ def process_chunk(
     if _depth >= MAX_RETRY_DEPTH:
         return texts  # Best-effort: return originals to avoid infinite recursion
 
-    numbered = format_numbered_segments(texts)
+    json_segments = format_json_segments(texts)
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -94,7 +94,7 @@ def process_chunk(
                 source_lang=source_lang,
                 target_lang=target_lang,
                 context=context,
-                numbered_segments=numbered,
+                json_segments=json_segments,
             ),
         },
     ]
@@ -131,8 +131,8 @@ def process_chunk(
         )
         reask_msg = (
             f"You returned {parsed_count} items but I need exactly "
-            f"{len(texts)} translations. Please return a JSON object like "
-            f'{{"translations": [...]}} with exactly {len(texts)} strings.'
+            f"{len(texts)} translations. Please return a JSON object with "
+            f'keys "1" through "{len(texts)}", each mapped to its translation.'
         )
         retry_messages = messages + [
             {"role": "assistant", "content": response},

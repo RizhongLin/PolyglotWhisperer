@@ -44,36 +44,39 @@ You are a professional subtitle translator. Translate subtitle segments \
 into natural, idiomatic {target_lang} — not word-for-word from {source_lang}.
 
 Rules:
-- Return exactly the same number of translations as input lines — do NOT merge or split segments
-- Translate ONLY the numbered lines between the ===BEGIN=== and ===END=== markers
-- Consecutive lines are part of the same speech and a sentence may span multiple lines. \
-Keep each line's core meaning roughly aligned with its source (subtitles are timed to audio), \
-but always ensure the translated lines read coherently and fluently when joined together
+- Each key in the input MUST have exactly one translation in the output — \
+do NOT merge or split segments. Every key ("1", "2", ...) must appear in the output.
+- Translate ONLY the segments between the ===BEGIN=== and ===END=== markers
+- Consecutive segments are part of the same speech and a sentence may span multiple segments. \
+Keep each segment's core meaning roughly aligned with its source (subtitles are timed to audio), \
+but always ensure the translated segments read coherently and fluently when joined together
 - Use natural {target_lang} grammar, word order, and phrasing \
 — avoid mimicking {source_lang} structure
 - Keep proper nouns (names, places, brands) in their original form
 - Keep translations concise — suitable for subtitle display
 - Do NOT add extra text, explanations, or commentary
 
-Example — a sentence split across two lines:
+Example — a sentence split across two segments:
 Input:
-1. Le président a annoncé une nouvelle taxe
-2. sur les importations en provenance d'Asie.
-Good output (aligned and coherent):
-{{"translations": ["The president announced a new tax", "on imports from Asia."]}}
-Bad output (meaning shifted across lines):
-{{"translations": ["The president announced", "a new tax on imports from Asia."]}}
+{{"1": "Le président a annoncé une nouvelle taxe", \
+"2": "sur les importations en provenance d'Asie."}}
+Good output (1:1 mapping, each key preserved):
+{{"1": "The president announced a new tax", \
+"2": "on imports from Asia."}}
+Bad output (key "2" merged into "1"):
+{{"1": "The president announced a new tax on imports from Asia.", \
+"2": ""}}
 
-Output format — return a JSON object with a "translations" key:
-{{"translations": ["translation 1", "translation 2", ...]}}
+Output format — return a JSON object with the SAME numbered keys as the input:
+{{"1": "translation 1", "2": "translation 2", ...}}
 """
 
 TRANSLATION_USER = """\
-Translate these {count} lines from {source_lang} to {target_lang}. \
-Return exactly {count} translations as a JSON object: {{"translations": [...]}}.
+Translate these {count} segments from {source_lang} to {target_lang}. \
+Return a JSON object with keys "1" through "{count}", each mapped to its translation.
 
 {context}===BEGIN===
-{numbered_segments}
+{json_segments}
 ===END===
 """
 
@@ -85,6 +88,16 @@ def format_numbered_segments(texts: list[str]) -> str:
     exactly one line per numbered item (subtitle line wraps are visual only).
     """
     return "\n".join(f"{i + 1}. {' '.join(text.split())}" for i, text in enumerate(texts))
+
+
+def format_json_segments(texts: list[str]) -> str:
+    """Format subtitle texts as a JSON object with numbered string keys.
+
+    Output: {"1": "text one", "2": "text two", ...}
+    Collapses newlines within each text to spaces.
+    """
+    segments = {str(i + 1): " ".join(text.split()) for i, text in enumerate(texts)}
+    return json.dumps(segments, ensure_ascii=False)
 
 
 def format_history_context(
@@ -146,9 +159,11 @@ def parse_numbered_response(response: str, expected_count: int) -> tuple[list[st
 def parse_json_response(response: str, expected_count: int) -> tuple[list[str], bool]:
     """Try to parse a JSON object response from the LLM.
 
-    Expected format: {"translations": ["t1", "t2", ...]}
-    Falls back gracefully — returns ([], False) if response is not valid JSON
-    or does not contain a translations array.
+    Supports two formats:
+    1. Keyed: {"1": "t1", "2": "t2", ...} — preferred, forces 1:1 mapping
+    2. Array: {"translations": ["t1", "t2", ...]} — legacy fallback
+
+    Falls back gracefully — returns ([], False) if response is not valid JSON.
     """
     text = response.strip()
     # Strip markdown code fences if present
@@ -165,7 +180,19 @@ def parse_json_response(response: str, expected_count: int) -> tuple[list[str], 
     if not isinstance(data, dict):
         return [], False
 
-    # Extract translations array from the object
+    # Try keyed format first: {"1": "t1", "2": "t2", ...}
+    numeric_keys: dict[int, str] = {}
+    for k, v in data.items():
+        try:
+            numeric_keys[int(k)] = str(v).strip()
+        except (ValueError, TypeError):
+            pass
+    if numeric_keys:
+        max_key = max(numeric_keys)
+        parsed = [numeric_keys.get(i + 1, "") for i in range(max_key)]
+        return _normalize_parsed(parsed, expected_count)
+
+    # Fallback: array format {"translations": ["t1", "t2", ...]}
     translations = None
     for key in ("translations", "translated", "results"):
         if key in data and isinstance(data[key], list):
