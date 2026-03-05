@@ -76,10 +76,9 @@ uv sync --extra export        # PDF/EPUB export (WeasyPrint, ebooklib)
 
 ```bash
 cp .env.example .env   # edit and add your keys
-# or export directly:
-export GROQ_API_KEY=gsk_...
-export OPENAI_API_KEY=sk-...
 ```
+
+LiteLLM routes to any provider via model prefix — set the matching API key in `.env`. See `.env.example` for supported providers.
 
 ### Usage
 
@@ -119,18 +118,18 @@ Config layers (lowest to highest priority): packaged defaults → `~/.config/pgw
 ```toml
 # pgw.toml
 [whisper]
-backend = "api"                            # "local" or "api"
-api_model = "groq/whisper-large-v3-turbo"
+backend = "api"                       # "local" or "api"
+api_model = "groq/whisper-large-v3-turbo"  # provider/model via LiteLLM
 language = "fr"
 
 [llm]
-backend = "api"                            # "local" or "api"
-local_model = "ollama_chat/qwen3:8b"      # for local backend
-api_model = "groq/openai/gpt-oss-120b" # for api backend
+backend = "api"                       # "local" or "api"
+local_model = "ollama_chat/qwen3:8b"  # Ollama for local backend
+api_model = "openrouter/openai/gpt-oss-120b"  # any LiteLLM provider/model
 target_language = "en"
 ```
 
-Environment variables use `PGW_` prefix: `PGW_WHISPER__BACKEND=api`, `PGW_LLM__BACKEND=api`, `PGW_LLM__API_MODEL=groq/openai/gpt-oss-120b`.
+Environment variables use `PGW_` prefix: `PGW_WHISPER__BACKEND=api`, `PGW_LLM__BACKEND=api`, `PGW_LLM__API_MODEL=<provider/model>`.
 
 ### Workspace Output
 
@@ -168,9 +167,9 @@ pgw_workspace/
 pgw transcribe audio.wav -l fr                              # large-v3-turbo on MLX
 pgw transcribe audio.wav -l fr --whisper-model medium        # smaller model
 
-# Cloud API
-pgw transcribe audio.wav --backend api -l fr                                     # Groq (default)
-pgw transcribe audio.wav --backend api --whisper-model openai/whisper-1 -l fr     # OpenAI
+# Cloud API (any LiteLLM-supported provider)
+pgw transcribe audio.wav --backend api -l fr
+pgw transcribe audio.wav --backend api --whisper-model openai/whisper-1 -l fr
 ```
 
 ## Vocabulary Analysis

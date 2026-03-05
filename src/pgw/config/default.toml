@@ -9,7 +9,7 @@ word_timestamps = true
 [llm]
 backend = "local"
 local_model = "ollama_chat/qwen3:8b"
-api_model = "groq/openai/gpt-oss-120b"
+api_model = "openrouter/openai/gpt-oss-120b"
 api_base = "http://localhost:11434"
 temperature = 0.3
 max_tokens = 16384

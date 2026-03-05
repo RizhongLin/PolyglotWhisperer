@@ -46,7 +46,7 @@ class WhisperConfig(BackendConfig):
 
 class LLMConfig(BackendConfig):
     local_model: str = "ollama_chat/qwen3:8b"
-    api_model: str = "groq/openai/gpt-oss-120b"
+    api_model: str = "openrouter/openai/gpt-oss-120b"
     api_base: str = "http://localhost:11434"
     temperature: float = 0.3
     max_tokens: int = 16384
