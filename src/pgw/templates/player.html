@@ -7,21 +7,21 @@
 <title>{title} — PolyglotWhisperer</title>
 <link rel="stylesheet"
   href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.classless.min.css">
-<link rel="icon" type="image/png" href="/icon.png">
-<link rel="stylesheet" href="/player.css">
+<link rel="icon" type="image/png" href="{base_url}/icon.png">
+<link rel="stylesheet" href="{base_url}/player.css">
 </head>
 <body>
 <header>
   <hgroup>
     <h1>{title}</h1>
-    <p><img src="/icon.png" class="brand-logo" alt="">PolyglotWhisperer</p>
+    <p><img src="{base_url}/icon.png" class="brand-logo" alt="">PolyglotWhisperer</p>
   </hgroup>
   <button id="theme-toggle" class="outline secondary"
     aria-label="Toggle theme"></button>
 </header>
 <main>
   <video id="player" controls autoplay>
-    <source src="/{video_filename}" type="{video_mime}">
+    <source src="{video_filename}" type="{video_mime}">
     {tracks}
   </video>
 
@@ -57,7 +57,7 @@
   </div>
 </main>
 <footer>
-  <p><img src="/logo.png" class="footer-logo" alt="PolyglotWhisperer"></p>
+  <p><img src="{base_url}/logo.png" class="footer-logo" alt="PolyglotWhisperer"></p>
   <p>
     <span class="footer-brand">PolyglotWhisperer</span>
     <span class="footer-sep">&middot;</span>
@@ -210,7 +210,7 @@
         const idx = transcriptCues.length - 1;
         let textHtml = `<span class="cue-lang-a">${{g.texts[0]}}</span>`;
         if (g.texts[1]) textHtml += `<br><span class="cue-lang-b">${{g.texts[1]}}</span>`;
-        html += `<div class="cue-row future" data-idx="${{idx}}" role="button" tabindex="0">`
+        html += `<div class="cue-row future" data-idx="${{idx}}" tabindex="0">`
           + `<span class="cue-time">${{fmtTime(g.startTime)}}</span>`
           + `<span class="cue-text">${{textHtml}}</span></div>`;
       }}
@@ -220,7 +220,7 @@
         const text = cue.text.replace(/<[^>]*>/g, '').trim();
         if (!text) continue;
         transcriptCues.push(cue);
-        html += `<div class="cue-row future" data-idx="${{transcriptCues.length - 1}}" role="button" tabindex="0">`
+        html += `<div class="cue-row future" data-idx="${{transcriptCues.length - 1}}" tabindex="0">`
           + `<span class="cue-time">${{fmtTime(cue.startTime)}}</span>`
           + `<span class="cue-text">${{text}}</span></div>`;
       }}
