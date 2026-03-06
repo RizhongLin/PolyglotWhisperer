@@ -20,7 +20,7 @@ translation_enabled = true
 target_language = "en"
 
 [download]
-format = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]"
+format = "bv*[ext=mp4]+ba[ext=m4a]/bv*+ba/b"
 subtitles = true
 
 [player]

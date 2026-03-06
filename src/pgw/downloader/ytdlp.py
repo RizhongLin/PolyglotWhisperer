@@ -253,8 +253,6 @@ def download(
             }
         )
 
-    console.print(f"[bold]Downloading:[/bold] {url}")
-
     with yt_dlp.YoutubeDL(opts) as ydl:
         with progress:
             info = ydl.extract_info(url, download=True)
