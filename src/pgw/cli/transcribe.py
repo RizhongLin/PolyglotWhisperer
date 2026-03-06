@@ -11,7 +11,7 @@ from pgw.cli.utils import build_config_overrides, expand_inputs, print_batch_sum
 from pgw.core.config import PGWConfig, load_config
 from pgw.downloader.resolver import is_url, resolve
 from pgw.utils.audio import extract_audio
-from pgw.utils.console import console, stage
+from pgw.utils.console import console, error, saved, stage, warning
 
 
 def transcribe(
@@ -82,7 +82,7 @@ def transcribe(
     try:
         validate_language(language)
     except ValueError as e:
-        console.print(f"[red]{e}[/red]")
+        error(str(e))
         raise typer.Exit(1)
 
     overrides = build_config_overrides(
@@ -98,7 +98,7 @@ def transcribe(
 
     expanded = expand_inputs(inputs)
     if not expanded:
-        console.print("[red]No inputs resolved. Check your paths or patterns.[/red]")
+        error("No inputs resolved. Check your paths or patterns.")
         raise typer.Exit(1)
 
     # Single input — original behavior
@@ -118,7 +118,7 @@ def transcribe(
 
     # Batch mode — output flag ignored, process each
     if output is not None:
-        console.print("[yellow]--output ignored in batch mode (auto-naming per file).[/yellow]")
+        warning("--output ignored in batch mode (auto-naming per file).")
 
     results: list[tuple[str, str, str]] = []
     console.print(f"[bold]Batch transcribing {len(expanded)} inputs...[/bold]\n")
@@ -139,7 +139,7 @@ def transcribe(
             )
             results.append((input_path, "success", ""))
         except Exception as e:
-            console.print(f"[red]Failed:[/red] {e}")
+            error(f"Failed: {e}")
             results.append((input_path, "failed", str(e)))
 
     # Summary table
@@ -209,13 +209,13 @@ def _transcribe_single(
             segments = cleanup_subtitles(segments, language, config.llm)
 
         save_subtitles(segments, sub_path, fmt=fmt)
-        console.print(f"[green]Saved:[/green] {sub_path}")
+        saved(sub_path)
 
         if save_txt:
             txt_path = sub_path.with_suffix(".txt")
             if txt_path != sub_path:
                 save_subtitles(segments, txt_path, fmt="txt")
-                console.print(f"[green]Saved:[/green] {txt_path}")
+                saved(txt_path)
         return
 
     use_api = config.whisper.backend == "api"
@@ -260,7 +260,7 @@ def _transcribe_single(
             else:
                 result.to_srt_vtt(str(sub_path), vtt=True)
 
-    console.print(f"[green]Saved:[/green] {sub_path}")
+    saved(sub_path)
 
     # Also save plain text version
     if save_txt:
@@ -272,4 +272,4 @@ def _transcribe_single(
                 save_subtitles(segments, txt_path, fmt="txt")
             else:
                 result.to_txt(str(txt_path))
-            console.print(f"[green]Saved:[/green] {txt_path}")
+            saved(txt_path)

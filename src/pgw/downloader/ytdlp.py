@@ -9,7 +9,7 @@ from rich.progress import BarColumn, Progress, TaskID, TextColumn, TimeRemaining
 
 from pgw.core.models import VideoSource
 from pgw.utils.cache import file_hash
-from pgw.utils.console import console
+from pgw.utils.console import cache_hit, console, warning
 
 _DEFAULT_FORMAT = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
 _MANIFEST_NAME = ".downloads.jsonl"
@@ -148,21 +148,21 @@ def _find_cached(url: str, output_dir: Path, language: str | None = None) -> Vid
         # Quick size check before expensive hash verification
         expected_size = entry.get("size_bytes")
         if expected_size is not None and cached_path.stat().st_size != expected_size:
-            console.print(f"[yellow]Cache stale (size mismatch):[/yellow] {cached_path}")
+            warning(f"Cache stale (size mismatch): {cached_path}")
             continue
         # Full hash verification only if size matches
         expected_hash = entry.get("sha256")
         if expected_hash and file_hash(cached_path) != expected_hash:
-            console.print(f"[yellow]Cache stale (hash mismatch):[/yellow] {cached_path}")
+            warning(f"Cache stale (hash mismatch): {cached_path}")
             continue
-        console.print("  [dim]Using cached download[/dim]")
+        cache_hit("Using cached download")
         # Check for previously downloaded subtitle files
         subtitle_path = None
         subtitle_is_auto = False
         if language:
             subtitle_path, subtitle_is_auto = _find_subtitle_file(cached_path, language)
             if subtitle_path:
-                console.print("  [dim]Using cached subtitles[/dim]")
+                cache_hit("Using cached subtitles")
         return VideoSource(
             video_path=cached_path,
             source_url=url,
@@ -302,7 +302,7 @@ def download(
             subtitle_path, subtitle_is_auto = _find_subtitle_file(video_path, language)
         if subtitle_path:
             kind = "auto-generated" if subtitle_is_auto else "human-made"
-            console.print(f"  [dim]Found {kind} subtitles[/dim]")
+            cache_hit(f"Found {kind} subtitles")
 
     return VideoSource(
         video_path=video_path,

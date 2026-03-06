@@ -75,19 +75,19 @@ def run(
     """
     from pgw.core.languages import validate_language
     from pgw.core.pipeline import run_pipeline
-    from pgw.utils.console import console
+    from pgw.utils.console import console, error
 
     try:
         validate_language(language)
     except ValueError as e:
-        console.print(f"[red]{e}[/red]")
+        error(str(e))
         raise typer.Exit(1)
 
     if translate is not None:
         try:
             validate_language(translate)
         except ValueError as e:
-            console.print(f"[red]{e}[/red]")
+            error(str(e))
             raise typer.Exit(1)
 
     overrides = build_config_overrides(
@@ -104,7 +104,7 @@ def run(
 
     expanded = expand_inputs(inputs)
     if not expanded:
-        console.print("[red]No inputs resolved. Check your paths or patterns.[/red]")
+        error("No inputs resolved. Check your paths or patterns.")
         raise typer.Exit(1)
 
     # Single input — original behavior
@@ -140,7 +140,7 @@ def run(
             )
             results.append((input_path, "success", str(workspace)))
         except Exception as e:
-            console.print(f"[red]Failed:[/red] {e}")
+            error(f"Failed: {e}")
             results.append((input_path, "failed", str(e)))
 
     # Summary table

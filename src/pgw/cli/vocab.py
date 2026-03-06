@@ -8,7 +8,7 @@ from pathlib import Path
 import typer
 from rich.table import Table
 
-from pgw.utils.console import console
+from pgw.utils.console import console, error, saved, stage
 
 
 def vocab(
@@ -19,7 +19,7 @@ def vocab(
     """Show vocabulary summary for a processed workspace."""
     workspace = Path(workspace)
     if not workspace.is_dir():
-        console.print(f"[red]Not a directory:[/red] {workspace}")
+        error(f"Not a directory: {workspace}")
         raise typer.Exit(1)
 
     # Try loading existing summary
@@ -30,7 +30,7 @@ def vocab(
         summary = _generate_from_workspace(workspace, language, top)
 
     if summary is None:
-        console.print("[red]No subtitle files found in workspace.[/red]")
+        error("No subtitle files found in workspace.")
         raise typer.Exit(1)
 
     _display_summary(summary, top)
@@ -74,7 +74,7 @@ def _generate_from_workspace(workspace: Path, language: str | None, top: int) ->
 
     from pgw.vocab.summary import generate_vocab_summary
 
-    console.print(f"[bold]Analyzing vocabulary ({language})...[/bold]")
+    stage("Analyzing vocabulary", language)
     summary = generate_vocab_summary(
         segments,
         language,
@@ -85,7 +85,7 @@ def _generate_from_workspace(workspace: Path, language: str | None, top: int) ->
     # Save for future use
     out_path = workspace / f"vocabulary.{language}.json"
     out_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-    console.print(f"[green]Saved:[/green] {out_path}")
+    saved(out_path)
 
     return summary
 

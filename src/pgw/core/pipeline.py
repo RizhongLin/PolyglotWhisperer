@@ -17,7 +17,7 @@ from pgw.utils.cache import (
     get_cache_dir,
     link_or_copy,
 )
-from pgw.utils.console import cache_hit, console, debug, stage, workspace_done
+from pgw.utils.console import cache_hit, debug, stage, warning, workspace_done
 from pgw.utils.paths import create_workspace, save_metadata, workspace_paths
 
 
@@ -329,7 +329,7 @@ def run_pipeline(
             except ImportError:
                 pass
             except Exception as e:
-                console.print(f"[yellow]PDF export skipped:[/yellow] {e}")
+                warning(f"PDF export skipped: {e}")
 
             try:
                 from pgw.subtitles.export import export_parallel_epub
@@ -347,7 +347,7 @@ def run_pipeline(
             except ImportError:
                 pass
             except Exception as e:
-                console.print(f"[yellow]EPUB export skipped:[/yellow] {e}")
+                warning(f"EPUB export skipped: {e}")
         else:
             cache_hit("Translation cached")
 
@@ -375,7 +375,7 @@ def run_pipeline(
     except ImportError:
         pass  # wordfreq or spacy not installed
     except Exception as e:
-        console.print(f"[yellow]Vocabulary summary skipped:[/yellow] {e}")
+        warning(f"Vocabulary summary skipped: {e}")
     emit("vocab", 1.0, "Vocabulary summary done")
 
     # Unload Ollama model from GPU only if LLM was actually used
@@ -414,7 +414,7 @@ def run_pipeline(
                 config=config.player,
             )
         else:
-            console.print("[yellow]mpv not found, skipping playback.[/yellow]")
+            warning("mpv not found, skipping playback.")
 
     emit("save", 1.0, "Done", data={"workspace": str(workspace)})
     workspace_done(workspace, saved)

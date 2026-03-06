@@ -10,7 +10,7 @@ from __future__ import annotations
 import copy
 
 from pgw.core.models import SubtitleSegment
-from pgw.utils.console import console
+from pgw.utils.console import warning
 from pgw.utils.spacy import load_spacy_model
 from pgw.utils.text import (
     APOSTROPHES,
@@ -49,9 +49,7 @@ def regroup_for_subtitles(result, max_chars: int = MAX_SEGMENT_CHARS) -> None:
     try:
         result.split_by_duration(max_dur=MAX_SEGMENT_DURATION)
     except ValueError:
-        console.print(
-            "[yellow]Warning: split_by_duration skipped (1-word segment edge case).[/yellow]"
-        )
+        warning("split_by_duration skipped (1-word segment edge case).")
     result.merge_by_gap(MERGE_GAP_THRESHOLD, max_words=3, max_chars=max_chars, is_sum_max=True)
     _merge_short_trailing(result, max_chars)
     result.clamp_max()

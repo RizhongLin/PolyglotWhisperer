@@ -13,7 +13,7 @@ from pathlib import Path
 
 from pgw.core.config import WhisperConfig
 from pgw.transcriber.postprocess import fix_dangling_function_words, regroup_for_subtitles
-from pgw.utils.console import console, stage
+from pgw.utils.console import stage, warning
 
 
 def _is_apple_silicon() -> bool:
@@ -29,7 +29,7 @@ def _select_backend(device: str) -> str:
 
             return "mlx"
         except ImportError:
-            console.print("[yellow]MLX not installed, falling back to vanilla Whisper.[/yellow]")
+            warning("MLX not installed, falling back to vanilla Whisper.")
 
     if device in ("cuda", "auto"):
         try:
@@ -62,7 +62,7 @@ def _resolve_device(device: str, backend: str) -> str | None:
         return "cpu"
 
     if device == "mps":
-        console.print("[yellow]Note:[/yellow] MPS not optimal for Whisper, using CPU.")
+        warning("MPS not optimal for Whisper, using CPU.")
         return "cpu"
 
     return device

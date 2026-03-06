@@ -15,7 +15,7 @@ from pgw.llm.prompts import (
     parse_numbered_response,
     reconstruct_with_empties,
 )
-from pgw.utils.console import chunk_progress, console
+from pgw.utils.console import chunk_progress, warning
 
 CHUNK_SIZE = 20
 OVERLAP = 2  # Context overlap between chunks for coherence
@@ -53,10 +53,7 @@ def _process_chunk(
         return cleaned_texts
 
     # Count mismatch — retry with smaller batches
-    console.print(
-        f"[yellow]Cleanup count mismatch ({len(texts)} expected), "
-        f"retrying with smaller batches...[/yellow]"
-    )
+    warning(f"Cleanup count mismatch ({len(texts)} expected), " f"retrying with smaller batches...")
     mid = len(texts) // 2
     first_half = _process_chunk(texts[:mid], language, config, context_prefix, _depth=_depth + 1)
     second_half = _process_chunk(texts[mid:], language, config, "", _depth=_depth + 1)
@@ -127,9 +124,7 @@ def cleanup_subtitles(
                         context_prefix,
                     )
                 except Exception as e:
-                    console.print(
-                        f"[yellow]Cleanup failed for chunk, keeping original:[/yellow] {e}"
-                    )
+                    warning(f"Cleanup failed for chunk, keeping original: {e}")
                     result_texts = non_empty_texts
             else:
                 result_texts = []

@@ -8,7 +8,7 @@ from typing import Annotated, Optional
 import typer
 
 from pgw.core.config import load_config
-from pgw.utils.console import console
+from pgw.utils.console import error
 from pgw.utils.paths import find_video
 
 
@@ -40,7 +40,7 @@ def play(
         workspace = video
         video_path = find_video(workspace)
         if video_path is None:
-            console.print(f"[red]No video file found in workspace:[/red] {workspace}")
+            error(f"No video file found in workspace: {workspace}")
             raise typer.Exit(1)
 
         # Auto-detect bilingual VTT
@@ -57,7 +57,7 @@ def play(
     else:
         video_path = video
         if not video_path.is_file():
-            console.print(f"[red]File not found:[/red] {video}")
+            error(f"File not found: {video}")
             raise typer.Exit(1)
 
     mpv_play(

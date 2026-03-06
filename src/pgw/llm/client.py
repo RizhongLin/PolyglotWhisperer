@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pgw.core.config import LLMConfig
-from pgw.utils.console import console
+from pgw.utils.console import stage, warning
 
 
 def _extract_ollama_model(model_id: str) -> str | None:
@@ -46,12 +46,12 @@ def ensure_ollama_model(model_id: str) -> None:
     if ":" not in model_name and f"{model_name}:latest" in available:
         return
 
-    console.print(f"[bold]Pulling Ollama model:[/bold] {model_name}")
+    stage("Pulling Ollama model", model_name)
     try:
         ollama.pull(model_name)
-        console.print(f"[green]Model ready:[/green] {model_name}")
+        stage("Model ready", model_name)
     except Exception as e:
-        console.print(f"[yellow]Failed to pull model {model_name}:[/yellow] {e}")
+        warning(f"Failed to pull model {model_name}: {e}")
 
 
 def complete(

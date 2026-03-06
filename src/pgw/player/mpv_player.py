@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 
 from pgw.core.config import PlayerConfig
-from pgw.utils.console import console
+from pgw.utils.console import stage
 
 
 def check_mpv() -> bool:
@@ -45,14 +45,14 @@ def play(
     # Prefer bilingual VTT (has positioning baked in)
     if bilingual_subs and bilingual_subs.is_file():
         cmd.append(f"--sub-file={bilingual_subs}")
-        console.print(f"[bold]Playing:[/bold] {video_path.name}")
-        console.print(f"[bold]Subtitles:[/bold] {bilingual_subs.name} (bilingual)")
+        stage("Playing", video_path.name)
+        stage("Subtitles", f"{bilingual_subs.name} (bilingual)")
     elif primary_subs and primary_subs.is_file():
         cmd.append(f"--sub-file={primary_subs}")
-        console.print(f"[bold]Playing:[/bold] {video_path.name}")
-        console.print(f"[bold]Subtitles:[/bold] {primary_subs.name}")
+        stage("Playing", video_path.name)
+        stage("Subtitles", primary_subs.name)
     else:
-        console.print(f"[bold]Playing:[/bold] {video_path.name}")
+        stage("Playing", video_path.name)
 
     proc = subprocess.Popen(cmd)
     try:

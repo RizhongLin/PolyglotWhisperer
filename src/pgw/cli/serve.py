@@ -16,7 +16,7 @@ from typing import Annotated, Optional
 
 import typer
 
-from pgw.utils.console import console
+from pgw.utils.console import console, error
 from pgw.utils.paths import find_video
 
 GITHUB_URL = "https://github.com/RizhongLin/PolyglotWhisperer"
@@ -364,12 +364,12 @@ def serve(
 def _serve_workspace(workspace: Path, host: str, port: int, no_open: bool) -> None:
     """Serve a single workspace as a video player."""
     if not workspace.is_dir():
-        console.print(f"[red]Not a directory:[/red] {workspace}")
+        error(f"Not a directory: {workspace}")
         raise typer.Exit(1)
 
     video_path = find_video(workspace)
     if video_path is None:
-        console.print(f"[red]No video file found in:[/red] {workspace}")
+        error(f"No video file found in: {workspace}")
         raise typer.Exit(1)
 
     player_html = _build_html(workspace, video_path)

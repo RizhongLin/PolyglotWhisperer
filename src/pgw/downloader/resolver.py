@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 
 from pgw.core.models import VideoSource
 from pgw.utils.cache import file_hash
-from pgw.utils.console import console
+from pgw.utils.console import debug
 
 
 def is_url(input_path: str) -> bool:
@@ -52,7 +52,7 @@ def resolve(
 
     size_mb = path.stat().st_size / (1024 * 1024)
     if size_mb > 100:
-        console.print("  [dim]Indexing file...[/dim]")
+        debug("Indexing file...")
     content_hash = file_hash(path)
 
     return VideoSource(

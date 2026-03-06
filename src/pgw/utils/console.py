@@ -34,6 +34,22 @@ def cache_hit(message: str = "Using cache") -> None:
     console.print(f"  [dim]{message}[/dim]")
 
 
+def error(message: str) -> None:
+    """Print an error message in red."""
+    console.print(f"[red]{message}[/red]")
+
+
+def warning(message: str) -> None:
+    """Print a warning message in yellow."""
+    console.print(f"[yellow]{message}[/yellow]")
+
+
+def saved(*paths: Path | str) -> None:
+    """Print green 'Saved' with file path(s)."""
+    names = "  ".join(str(p) for p in paths)
+    console.print(f"[green]Saved:[/green] {names}")
+
+
 def debug(message: str) -> None:
     """Print only when PGW_DEBUG=1."""
     if os.environ.get("PGW_DEBUG"):

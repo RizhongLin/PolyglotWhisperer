@@ -12,7 +12,7 @@ from __future__ import annotations
 import subprocess
 import sys
 
-from pgw.utils.console import console
+from pgw.utils.console import stage, warning
 
 # Mapping from pgw language codes to spaCy model names.
 # Languages without a model here gracefully skip NLP features.
@@ -92,12 +92,12 @@ def load_spacy_model(language: str, enable_lemmatizer: bool = False):
         nlp = spacy.load(model_name, disable=disable)
     except OSError:
         # Model not installed — auto-download via uv (preferred) or pip
-        console.print(f"[bold]Downloading spaCy model:[/bold] {model_name}")
+        stage("Downloading spaCy model", model_name)
         try:
             _install_spacy_model(model_name)
             nlp = spacy.load(model_name, disable=disable)
         except (SystemExit, Exception):
-            console.print(f"[yellow]Could not load spaCy model {model_name}, skipping.[/yellow]")
+            warning(f"Could not load spaCy model {model_name}, skipping.")
             cache[language] = None
             return None
 

@@ -9,7 +9,7 @@ import typer
 
 from pgw.core.config import load_config
 from pgw.subtitles.converter import load_subtitles, save_subtitles
-from pgw.utils.console import console, stage
+from pgw.utils.console import error, saved, stage
 
 
 def translate(
@@ -54,11 +54,11 @@ def translate(
         try:
             validate_language(code)
         except ValueError as e:
-            console.print(f"[red]{e}[/red]")
+            error(str(e))
             raise typer.Exit(1)
 
     if not subtitle_file.is_file():
-        console.print(f"[red]File not found:[/red] {subtitle_file}")
+        error(f"File not found: {subtitle_file}")
         raise typer.Exit(1)
 
     overrides = {}
@@ -92,4 +92,4 @@ def translate(
             save_subtitles(result.translated, txt_path, fmt="txt")
             saved_names.append(txt_path.name)
 
-    console.print(f"\n[green]Saved:[/green] {'  '.join(saved_names)}")
+    saved(*saved_names)

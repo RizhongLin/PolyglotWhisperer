@@ -21,7 +21,7 @@ from pgw.llm.prompts import (
     parse_numbered_response,
     reconstruct_with_empties,
 )
-from pgw.utils.console import chunk_progress, console
+from pgw.utils.console import chunk_progress, debug, warning
 from pgw.utils.text import SENTENCE_END_CHARS, TIMING_GAP_THRESHOLD
 
 CHUNK_SIZE = 48
@@ -110,24 +110,23 @@ def process_chunk(
     import os
 
     if os.environ.get("PGW_DEBUG"):
-        console.print("[dim]--- DEBUG: source JSON ---[/dim]")
-        console.print(f"[dim]{json_segments}[/dim]")
-        console.print("[dim]--- DEBUG: raw LLM response ---[/dim]")
-        console.print(f"[dim]{response}[/dim]")
+        debug("--- DEBUG: source JSON ---")
+        debug(json_segments)
+        debug("--- DEBUG: raw LLM response ---")
+        debug(response)
         # Show raw key count from response
         try:
             raw = json.loads(response.strip())
             if isinstance(raw, dict):
-                console.print(f"[dim]Raw keys: {len(raw)} (expected {len(texts)})[/dim]")
+                debug(f"Raw keys: {len(raw)} (expected {len(texts)})")
         except (ValueError, json.JSONDecodeError):
-            console.print("[dim]Failed to parse response as JSON[/dim]")
+            debug("Failed to parse response as JSON")
 
     # --- Issue 5: Single retry before split ---
     if not _retried:
         parsed_count = sum(1 for t in translated_texts if t)
-        console.print(
-            f"[yellow]Count mismatch ({parsed_count} vs {len(texts)} expected), "
-            f"retrying same chunk...[/yellow]"
+        warning(
+            f"Count mismatch ({parsed_count} vs {len(texts)} expected), " f"retrying same chunk..."
         )
         reask_msg = (
             f"You returned {parsed_count} items but I need exactly "
@@ -145,7 +144,7 @@ def process_chunk(
         # Fall through to split
 
     # --- Issue 4: Binary split with fresh context for second half ---
-    console.print(f"[yellow]Splitting into smaller batches ({len(texts)} segments)...[/yellow]")
+    warning(f"Splitting into smaller batches ({len(texts)} segments)...")
     mid = len(texts) // 2
     first_half = process_chunk(
         texts[:mid],
@@ -364,9 +363,7 @@ def translate_subtitles(
                         context,
                     )
                 except Exception as e:
-                    console.print(
-                        f"[yellow]Translation failed for chunk, keeping original:[/yellow] {e}"
-                    )
+                    warning(f"Translation failed for chunk, keeping original: {e}")
                     result_texts = non_empty_texts
             else:
                 result_texts = []
