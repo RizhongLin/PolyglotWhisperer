@@ -280,7 +280,6 @@ def translate_subtitles(
     """
     if chunk_size is None:
         chunk_size = _auto_chunk_size(config.model)
-        console.print(f"[dim]Chunk size: {chunk_size} segments[/dim]")
 
     translated: list[SubtitleSegment] = []
 
@@ -405,8 +404,6 @@ def translate_subtitles(
             progress.advance(task)
             if on_progress:
                 on_progress((chunk_idx + 1) / total_chunks)
-
-    console.print(f"[green]Translation complete:[/green] {len(translated)} segments")
 
     return TranslationResult(
         original=segments,

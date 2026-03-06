@@ -136,6 +136,5 @@ def unload_ollama_model(model_id: str) -> None:
 
     try:
         ollama.generate(model=model_name, keep_alive=0)
-        console.print(f"[dim]Unloaded Ollama model:[/dim] {model_name}")
     except Exception:
         pass

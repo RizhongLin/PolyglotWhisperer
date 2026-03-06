@@ -52,7 +52,7 @@ def resolve(
 
     size_mb = path.stat().st_size / (1024 * 1024)
     if size_mb > 100:
-        console.print(f"[dim]Computing file hash ({size_mb:.0f} MB)...[/dim]")
+        console.print("  [dim]Indexing file...[/dim]")
     content_hash = file_hash(path)
 
     return VideoSource(

@@ -155,14 +155,14 @@ def _find_cached(url: str, output_dir: Path, language: str | None = None) -> Vid
         if expected_hash and file_hash(cached_path) != expected_hash:
             console.print(f"[yellow]Cache stale (hash mismatch):[/yellow] {cached_path}")
             continue
-        console.print(f"[dim]Found cached download:[/dim] {cached_path}")
+        console.print("  [dim]Using cached download[/dim]")
         # Check for previously downloaded subtitle files
         subtitle_path = None
         subtitle_is_auto = False
         if language:
             subtitle_path, subtitle_is_auto = _find_subtitle_file(cached_path, language)
             if subtitle_path:
-                console.print(f"[dim]Found cached subtitles:[/dim] {subtitle_path.name}")
+                console.print("  [dim]Using cached subtitles[/dim]")
         return VideoSource(
             video_path=cached_path,
             source_url=url,
@@ -275,11 +275,7 @@ def download(
             raise RuntimeError(f"Download completed but no file found in {output_dir}")
         video_path = candidates[0]
 
-    console.print(f"[bold]Title:[/bold] {title}")
-    console.print(f"[green]Downloaded:[/green] {video_path}")
-
     # Compute hash and save to manifest
-    console.print("[dim]Computing file hash...[/dim]")
     content_sha = file_hash(video_path)
     from datetime import datetime, timezone
 
@@ -306,7 +302,7 @@ def download(
             subtitle_path, subtitle_is_auto = _find_subtitle_file(video_path, language)
         if subtitle_path:
             kind = "auto-generated" if subtitle_is_auto else "human-made"
-            console.print(f"[green]Found {kind} subtitles ({language})[/green]")
+            console.print(f"  [dim]Found {kind} subtitles[/dim]")
 
     return VideoSource(
         video_path=video_path,

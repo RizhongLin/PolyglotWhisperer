@@ -13,7 +13,7 @@ from pathlib import Path
 
 from pgw.core.config import WhisperConfig
 from pgw.transcriber.postprocess import fix_dangling_function_words, regroup_for_subtitles
-from pgw.utils.console import console
+from pgw.utils.console import console, stage
 
 
 def _is_apple_silicon() -> bool:
@@ -69,17 +69,23 @@ def _resolve_device(device: str, backend: str) -> str | None:
 
 
 def _load_model(config: WhisperConfig):
-    """Load a Whisper model using the best available backend."""
+    """Load a Whisper model using the best available backend.
+
+    Returns (model, description) where description is a human-readable
+    string like "large-v3-turbo (MLX)" for the caller to display.
+    """
     import stable_whisper
 
     backend = _select_backend(config.device)
     device = _resolve_device(config.device, backend)
 
     if backend == "mlx":
-        console.print(f"[bold]Loading model:[/bold] {config.model} (MLX, Apple Silicon)")
+        desc = f"{config.model} (MLX)"
+        stage("Transcribing", desc)
         return stable_whisper.load_mlx_whisper(config.model)
 
-    console.print(f"[bold]Loading model:[/bold] {config.model} on {device}")
+    desc = f"{config.model} ({device})"
+    stage("Transcribing", desc)
     return stable_whisper.load_model(config.model, device=device)
 
 
@@ -103,7 +109,6 @@ def transcribe(audio_path: Path, config: WhisperConfig):
 
     model = _load_model(config)
 
-    console.print("[bold]Transcribing...[/bold]")
     result = model.transcribe(
         str(audio_path),
         language=config.language,
@@ -120,9 +125,6 @@ def transcribe(audio_path: Path, config: WhisperConfig):
     if config.word_timestamps:
         regroup_for_subtitles(result)
         fix_dangling_function_words(result, config.language)
-
-    seg_count = len(result.segments) if result.segments else 0
-    console.print(f"[green]Transcription complete:[/green] {seg_count} segments")
 
     return result
 

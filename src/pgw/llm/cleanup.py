@@ -154,5 +154,4 @@ def cleanup_subtitles(
                 chunk_idx = i // chunk_size + 1
                 on_progress(chunk_idx / total_chunks)
 
-    console.print(f"[green]Cleanup complete:[/green] {len(cleaned)} segments")
     return cleaned

@@ -11,7 +11,7 @@ from pgw.core.events import EventCallback, PipelineEvent
 from pgw.downloader.resolver import is_url, resolve
 from pgw.utils.audio import extract_audio_cached
 from pgw.utils.cache import cache_key, find_cached_file, get_cache_dir, link_or_copy
-from pgw.utils.console import console
+from pgw.utils.console import cache_hit, console, debug, stage, workspace_done
 from pgw.utils.paths import create_workspace, save_metadata, workspace_paths
 
 
@@ -42,18 +42,19 @@ def run_pipeline(
         Path to the workspace directory.
     """
 
-    def emit(stage: str, progress: float, message: str, data: dict | None = None) -> None:
+    def emit(stg: str, progress: float, message: str, data: dict | None = None) -> None:
         if on_event:
-            on_event(PipelineEvent(stage=stage, progress=progress, message=message, data=data))
+            on_event(PipelineEvent(stage=stg, progress=progress, message=message, data=data))
 
     language = config.whisper.language
     segments: list | None = None
     trans_result = None
+    saved: list[Path] = []
 
     # Step 1: Resolve input (always goes through resolve() for content_hash)
     emit("download", 0.0, f"Resolving input: {input_path}")
     if is_url(input_path):
-        console.print(f"[bold]Downloading:[/bold] {input_path}")
+        stage("Downloading", input_path)
     sub_language = language if config.download.subtitles else None
     source = resolve(
         input_path,
@@ -68,7 +69,6 @@ def run_pipeline(
     video_ext = source.video_path.suffix or ".mp4"
     workspace = create_workspace(title, base_dir=config.workspace_dir)
     paths = workspace_paths(workspace, language, target_lang=translate, video_ext=video_ext)
-    console.print(f"[bold]Workspace:[/bold] {workspace}")
 
     # Link video into workspace (symlink to save disk, copy as fallback)
     video_dest = paths["video"]
@@ -79,16 +79,16 @@ def run_pipeline(
     emit("audio", 0.0, "Extracting audio...")
     audio_path = paths["audio"]
     if not audio_path.is_file():
-        clip_msg = ""
+        clip_detail = ""
         if start or duration:
             parts = []
             if start:
                 parts.append(f"from {start}")
             if duration:
                 parts.append(f"duration {duration}")
-            clip_msg = f" ({', '.join(parts)})"
-        console.print(f"[bold]Extracting audio{clip_msg}...[/bold]")
-        _, cache_hit = extract_audio_cached(
+            clip_detail = ", ".join(parts)
+        stage("Extracting audio", clip_detail)
+        _, was_cached = extract_audio_cached(
             source.video_path,
             output_path=audio_path,
             workspace_dir=config.workspace_dir,
@@ -96,10 +96,10 @@ def run_pipeline(
             duration=duration,
             content_hash=source.content_hash,
         )
-        if cache_hit:
-            console.print("[dim]Audio found in cache.[/dim]")
+        if was_cached:
+            cache_hit()
     else:
-        console.print("[dim]Audio already extracted, skipping.[/dim]")
+        cache_hit("Audio already extracted")
     emit("audio", 1.0, "Audio ready")
 
     # Step 3.5: Use downloaded subtitles if available (skip Whisper)
@@ -110,7 +110,7 @@ def run_pipeline(
 
         emit("transcribe", 0.0, "Loading downloaded subtitles...")
         kind = "auto-generated" if source.subtitle_is_auto else "human-made"
-        console.print(f"[bold]Using downloaded subtitles[/bold] ({kind}, skipping Whisper)")
+        stage("Transcribing", f"using downloaded subtitles ({kind})")
         segments = load_subtitles(source.subtitle_path)
         # Only postprocess auto-generated subs; human-made are already well-segmented
         if source.subtitle_is_auto:
@@ -118,9 +118,9 @@ def run_pipeline(
 
             segments = postprocess_segments(segments, language)
         save_subtitles(segments, vtt_path, fmt="vtt")
-        console.print(f"[green]Saved:[/green] {vtt_path}")
+        saved.append(vtt_path)
         save_subtitles(segments, txt_path, fmt="txt")
-        console.print(f"[green]Saved:[/green] {txt_path}")
+        saved.append(txt_path)
         emit("transcribe", 1.0, "Downloaded subtitles ready")
 
     # Step 4: Transcribe (with shared cache)
@@ -160,7 +160,8 @@ def run_pipeline(
     if not vtt_path.is_file():
         if use_api and trans_cache_path is not None:
             # Cache hit: load API segments from shared cache
-            console.print("[dim]Transcription found in cache, loading...[/dim]")
+            stage("Transcribing", config.whisper.model)
+            cache_hit()
             from pgw.core.models import SubtitleSegment
 
             raw = json.loads(trans_cache_path.read_text(encoding="utf-8"))
@@ -168,6 +169,7 @@ def run_pipeline(
 
         elif use_api:
             # API transcription — returns segments directly, no WhisperResult
+            stage("Transcribing", config.whisper.model)
             from pgw.transcriber.api import transcribe as api_transcribe
 
             segments = api_transcribe(
@@ -182,11 +184,12 @@ def run_pipeline(
             trans_write_path.write_text(
                 json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8"
             )
-            console.print("[dim]Transcription cached.[/dim]")
+            debug("Transcription cached.")
 
         elif trans_cache_path is not None and needs_llm:
             # Cache hit: load local transcription from shared cache
-            console.print("[dim]Transcription found in cache, loading...[/dim]")
+            stage("Transcribing", config.whisper.model)
+            cache_hit()
             import stable_whisper
 
             from pgw.subtitles.converter import result_to_segments
@@ -201,7 +204,7 @@ def run_pipeline(
 
             # Save full result to shared cache
             result.save_as_json(str(trans_write_path))
-            console.print("[dim]Transcription cached.[/dim]")
+            debug("Transcription cached.")
 
             if needs_llm:
                 from pgw.subtitles.converter import result_to_segments
@@ -210,9 +213,9 @@ def run_pipeline(
             else:
                 # Use stable-ts built-in export — auto-detects VTT from extension
                 result.to_srt_vtt(str(vtt_path))
-                console.print(f"[green]Saved:[/green] {vtt_path}")
+                saved.append(vtt_path)
                 result.to_txt(str(txt_path))
-                console.print(f"[green]Saved:[/green] {txt_path}")
+                saved.append(txt_path)
 
             # Free transcription result to reclaim memory before LLM steps
             del result
@@ -229,7 +232,7 @@ def run_pipeline(
                 from pgw.llm.cleanup import cleanup_subtitles
 
                 emit("transcribe", 0.5, "Cleaning up transcription...")
-                console.print("[bold]Cleaning up transcription...[/bold]")
+                stage("Cleaning up", config.llm.model)
 
                 def _on_cleanup_progress(frac: float) -> None:
                     emit("transcribe", 0.5 + frac * 0.5, f"Cleaning ({frac:.0%})...")
@@ -243,11 +246,11 @@ def run_pipeline(
                 llm_was_used = True
 
             save_subtitles(segments, vtt_path, fmt="vtt")
-            console.print(f"[green]Saved:[/green] {vtt_path}")
+            saved.append(vtt_path)
             save_subtitles(segments, txt_path, fmt="txt")
-            console.print(f"[green]Saved:[/green] {txt_path}")
+            saved.append(txt_path)
     else:
-        console.print("[dim]Transcription found, skipping.[/dim]")
+        cache_hit("Transcription already done")
         if needs_llm:
             from pgw.subtitles.converter import load_subtitles
             from pgw.transcriber.postprocess import postprocess_segments
@@ -265,7 +268,7 @@ def run_pipeline(
             from pgw.subtitles.converter import save_bilingual_vtt, save_subtitles
 
             emit("translate", 0.0, f"Translating to {translate}...")
-            console.print(f"[bold]Translating to {translate}...[/bold]")
+            stage(f"Translating to {translate}", config.llm.model)
 
             def _on_translate_progress(frac: float) -> None:
                 emit("translate", frac, f"Translating ({frac:.0%})...")
@@ -281,16 +284,16 @@ def run_pipeline(
             llm_was_used = True
 
             save_subtitles(trans_result.translated, trans_vtt, fmt="vtt")
-            console.print(f"[green]Saved:[/green] {trans_vtt}")
+            saved.append(trans_vtt)
 
             trans_txt = paths["translation_txt"]
             save_subtitles(trans_result.translated, trans_txt, fmt="txt")
-            console.print(f"[green]Saved:[/green] {trans_txt}")
+            saved.append(trans_txt)
 
             # Bilingual VTT: original at bottom, translation at top
             bi_vtt = paths["bilingual_vtt"]
             save_bilingual_vtt(segments, trans_result.translated, bi_vtt)
-            console.print(f"[green]Saved:[/green] {bi_vtt}")
+            saved.append(bi_vtt)
             emit("translate", 1.0, "Translation complete")
 
             # Parallel text export (best-effort, requires export extras)
@@ -306,7 +309,7 @@ def run_pipeline(
                     translate,
                     title=title,
                 )
-                console.print(f"[green]Saved:[/green] {pdf_path}")
+                saved.append(pdf_path)
             except ImportError:
                 pass
             except Exception as e:
@@ -324,13 +327,13 @@ def run_pipeline(
                     translate,
                     title=title,
                 )
-                console.print(f"[green]Saved:[/green] {epub_path}")
+                saved.append(epub_path)
             except ImportError:
                 pass
             except Exception as e:
                 console.print(f"[yellow]EPUB export skipped:[/yellow] {e}")
         else:
-            console.print("[dim]Translation found, skipping.[/dim]")
+            cache_hit("Translation already done")
 
     # Step 5.5: Vocabulary summary (best-effort)
     emit("vocab", 0.0, "Generating vocabulary summary...")
@@ -348,9 +351,10 @@ def run_pipeline(
 
         summary_path = workspace / f"vocabulary.{language}.json"
         summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-        console.print(
-            f"[green]Vocabulary:[/green] {summary['unique_lemmas']} unique lemmas, "
-            f"estimated {summary['estimated_level']}"
+        saved.append(summary_path)
+        stage(
+            "Vocabulary",
+            f"{summary['unique_lemmas']} unique lemmas, estimated {summary['estimated_level']}",
         )
     except ImportError:
         pass  # wordfreq or spacy not installed
@@ -397,5 +401,5 @@ def run_pipeline(
             console.print("[yellow]mpv not found, skipping playback.[/yellow]")
 
     emit("save", 1.0, "Done", data={"workspace": str(workspace)})
-    console.print(f"\n[bold green]Done![/bold green] Workspace: {workspace}")
+    workspace_done(workspace, saved)
     return workspace

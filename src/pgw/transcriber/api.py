@@ -13,7 +13,7 @@ from pathlib import Path
 from pgw.core.config import WhisperConfig
 from pgw.core.models import SubtitleSegment
 from pgw.utils.cache import cache_key, find_cached_file, get_cache_dir
-from pgw.utils.console import console
+from pgw.utils.console import debug
 from pgw.utils.text import (
     CLAUSE_PUNCT,
     MAX_MERGE_LEAD_WORDS,
@@ -60,8 +60,6 @@ def transcribe(
     if file_size > _MAX_FILE_SIZE:
         audio_path = _compress_for_api(audio_path, workspace_dir, content_hash=content_hash)
 
-    console.print(f"[bold]Transcribing via API:[/bold] {config.model}")
-
     # Drop unsupported top-level params; pass timestamp_granularities via
     # extra_body so it reaches providers that support it (e.g. Groq, OpenAI)
     litellm.drop_params = True
@@ -78,9 +76,7 @@ def transcribe(
     with open(audio_path, "rb") as f:
         response = litellm.transcription(file=f, **call_kwargs)
 
-    segments = response_to_segments(response)
-    console.print(f"[green]Transcription complete:[/green] {len(segments)} segments")
-    return segments
+    return response_to_segments(response)
 
 
 def _compress_for_api(
@@ -106,12 +102,9 @@ def _compress_for_api(
             **params,
         )
         if hit is not None:
-            size_mb = hit.stat().st_size / (1024 * 1024)
-            console.print(f"[dim]Compressed audio found in cache ({size_mb:.1f} MB).[/dim]")
             return hit
 
-    size_mb = audio_path.stat().st_size / (1024 * 1024)
-    console.print(f"[bold]Compressing audio:[/bold] {size_mb:.1f} MB WAV → MP3 for API upload")
+    debug(f"Compressing audio: {audio_path.stat().st_size / (1024 * 1024):.1f} MB WAV → MP3")
 
     # Determine write path
     if workspace_dir is not None:
@@ -148,7 +141,7 @@ def _compress_for_api(
             f"Compressed audio is still {new_size_mb:.1f} MB, exceeding the 25 MB API limit. "
             "Use --start/--duration to clip, or switch to --backend local."
         )
-    console.print(f"[green]Compressed:[/green] {new_size_mb:.1f} MB")
+    debug(f"Compressed: {new_size_mb:.1f} MB")
     return mp3_path
 
 

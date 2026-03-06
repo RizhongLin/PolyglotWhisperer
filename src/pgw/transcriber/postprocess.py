@@ -115,7 +115,9 @@ def fix_overlapping_timestamps(
             fixed += 1
 
     if fixed:
-        console.print(f"[dim]Fixed {fixed} overlapping timestamp(s).[/dim]")
+        from pgw.utils.console import debug
+
+        debug(f"Fixed {fixed} overlapping timestamp(s).")
 
     return segments
 

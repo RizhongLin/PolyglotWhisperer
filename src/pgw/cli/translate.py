@@ -9,7 +9,7 @@ import typer
 
 from pgw.core.config import load_config
 from pgw.subtitles.converter import load_subtitles, save_subtitles
-from pgw.utils.console import console
+from pgw.utils.console import console, stage
 
 
 def translate(
@@ -71,9 +71,9 @@ def translate(
 
     config = load_config(**overrides)
 
-    console.print(f"[bold]Loading subtitles:[/bold] {subtitle_file}")
     segments = load_subtitles(subtitle_file)
-    console.print(f"[bold]Segments:[/bold] {len(segments)}")
+    stage("Loading", f"{subtitle_file.name} ({len(segments)} segments)")
+    stage(f"Translating to {to}", config.llm.model)
 
     result = translate_subtitles(segments, source, to, config.llm)
 
@@ -84,10 +84,12 @@ def translate(
         sub_path = subtitle_file.with_suffix(f".{to}.{fmt}")
 
     save_subtitles(result.translated, sub_path, fmt=fmt)
-    console.print(f"[green]Saved:[/green] {sub_path}")
+    saved_names = [sub_path.name]
 
     if not no_txt:
         txt_path = sub_path.with_suffix(".txt")
         if txt_path != sub_path:
             save_subtitles(result.translated, txt_path, fmt="txt")
-            console.print(f"[green]Saved:[/green] {txt_path}")
+            saved_names.append(txt_path.name)
+
+    console.print(f"\n[green]Saved:[/green] {'  '.join(saved_names)}")
