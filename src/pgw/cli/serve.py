@@ -278,7 +278,7 @@ def serve(
         player_css=_PLAYER_CSS,
         icon_png=_ICON_PNG,
     )
-    server = http.server.HTTPServer((host, port), handler_class)
+    server = http.server.ThreadingHTTPServer((host, port), handler_class)
 
     url = f"http://{host}:{port}"
     console.print(f"[bold green]Serving:[/bold green] {url}")
@@ -336,6 +336,15 @@ class _WorkspaceHandler(http.server.BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(content)))
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; "
+            "style-src 'self' https://cdn.jsdelivr.net; "
+            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "img-src 'self' data:; "
+            "media-src 'self'; "
+            "connect-src 'self'",
+        )
         self.end_headers()
         self.wfile.write(content)
 

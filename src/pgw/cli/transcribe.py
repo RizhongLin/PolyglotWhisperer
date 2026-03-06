@@ -11,7 +11,7 @@ from pgw.cli.utils import build_config_overrides, expand_inputs, print_batch_sum
 from pgw.core.config import PGWConfig, load_config
 from pgw.downloader.resolver import is_url, resolve
 from pgw.utils.audio import extract_audio
-from pgw.utils.console import console
+from pgw.utils.console import console, stage
 
 
 def transcribe(
@@ -162,7 +162,7 @@ def _transcribe_single(
     # Resolve input: URL → download, local path → use directly
     source = None
     if is_url(input_path):
-        console.print(f"[bold]Downloading:[/bold] {input_path}")
+        stage("Downloading", input_path)
         sub_language = language if config.download.subtitles else None
         source = resolve(
             input_path,
@@ -181,7 +181,7 @@ def _transcribe_single(
     if video_path.suffix.lower() in audio_suffixes:
         audio_path = video_path
     else:
-        console.print("[bold]Extracting audio...[/bold]")
+        stage("Extracting audio")
         audio_path = extract_audio(video_path, start=start, duration=duration)
 
     # Determine output path
@@ -195,7 +195,7 @@ def _transcribe_single(
         from pgw.subtitles.converter import load_subtitles, save_subtitles
 
         kind = "auto-generated" if source.subtitle_is_auto else "human-made"
-        console.print(f"[bold]Using downloaded subtitles[/bold] ({kind}, skipping Whisper)")
+        stage("Using downloaded subtitles", f"{kind}, skipping Whisper")
         segments = load_subtitles(source.subtitle_path)
         if source.subtitle_is_auto:
             from pgw.transcriber.postprocess import postprocess_segments
@@ -205,7 +205,7 @@ def _transcribe_single(
         if cleanup:
             from pgw.llm.cleanup import cleanup_subtitles
 
-            console.print("[bold]Cleaning up with LLM...[/bold]")
+            stage("Cleaning up", config.llm.model)
             segments = cleanup_subtitles(segments, language, config.llm)
 
         save_subtitles(segments, sub_path, fmt=fmt)
@@ -232,7 +232,7 @@ def _transcribe_single(
         if cleanup:
             from pgw.llm.cleanup import cleanup_subtitles
 
-            console.print("[bold]Cleaning up with LLM...[/bold]")
+            stage("Cleaning up", config.llm.model)
             segments = cleanup_subtitles(segments, language, config.llm)
 
         save_subtitles(segments, sub_path, fmt=fmt)
@@ -249,7 +249,7 @@ def _transcribe_single(
 
             segments = result_to_segments(result)
             segments = postprocess_segments(segments, language)
-            console.print("[bold]Cleaning up with LLM...[/bold]")
+            stage("Cleaning up", config.llm.model)
             segments = cleanup_subtitles(segments, language, config.llm)
             save_subtitles(segments, sub_path, fmt=fmt)
         else:

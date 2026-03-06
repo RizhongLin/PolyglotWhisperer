@@ -27,11 +27,11 @@
 
   <div class="tracks" id="track-controls"></div>
 
-  <div class="transcript" id="transcript">
+  <div class="transcript" id="transcript" role="region" aria-label="Transcript">
     <div class="transcript-header">
       <i data-lucide="scroll-text"></i> Transcript
     </div>
-    <span class="copy-toast" id="copy-toast">
+    <span class="copy-toast" id="copy-toast" role="status" aria-live="polite">
       <i data-lucide="check"></i> Copied
     </span>
     <div class="transcript-body" id="transcript-body"></div>
@@ -109,6 +109,7 @@
 
   // --- Subtitle track toggles ---
   const controls = document.getElementById('track-controls');
+  let _syncing = false;
 
   for (let i = 0; i < tracks.length; i++) {{
     const t = tracks[i];
@@ -120,6 +121,7 @@
       `<input type="checkbox" id="${{id}}"${{chk}}>` +
       `<span><i data-lucide="captions"></i>${{t.label}}</span>`;
     label.querySelector('input').addEventListener('change', (e) => {{
+      _syncing = true;
       if (e.target.checked) {{
         // Radio behaviour: uncheck all others
         controls.querySelectorAll('input').forEach((inp) => {{
@@ -132,11 +134,22 @@
       }} else {{
         t.mode = 'hidden';
       }}
+      _syncing = false;
       buildTranscript();
     }});
     controls.appendChild(label);
     t.mode = isDefault ? 'showing' : 'hidden';
   }}
+
+  // Sync our toggles when the browser's built-in CC menu changes tracks
+  tracks.addEventListener('change', () => {{
+    if (_syncing) return;
+    controls.querySelectorAll('input').forEach((inp) => {{
+      const idx = parseInt(inp.id.split('-')[1]);
+      inp.checked = (tracks[idx].mode === 'showing');
+    }});
+    buildTranscript();
+  }});
 
   // --- Transcript ---
   const transcriptBody = document.getElementById('transcript-body');
@@ -197,7 +210,7 @@
         const idx = transcriptCues.length - 1;
         let textHtml = `<span class="cue-lang-a">${{g.texts[0]}}</span>`;
         if (g.texts[1]) textHtml += `<br><span class="cue-lang-b">${{g.texts[1]}}</span>`;
-        html += `<div class="cue-row future" data-idx="${{idx}}">`
+        html += `<div class="cue-row future" data-idx="${{idx}}" role="button" tabindex="0">`
           + `<span class="cue-time">${{fmtTime(g.startTime)}}</span>`
           + `<span class="cue-text">${{textHtml}}</span></div>`;
       }}
@@ -207,7 +220,7 @@
         const text = cue.text.replace(/<[^>]*>/g, '').trim();
         if (!text) continue;
         transcriptCues.push(cue);
-        html += `<div class="cue-row future" data-idx="${{transcriptCues.length - 1}}">`
+        html += `<div class="cue-row future" data-idx="${{transcriptCues.length - 1}}" role="button" tabindex="0">`
           + `<span class="cue-time">${{fmtTime(cue.startTime)}}</span>`
           + `<span class="cue-text">${{text}}</span></div>`;
       }}
@@ -234,6 +247,12 @@
           if (video.paused) video.play();
         }}
       }});
+      row.addEventListener('keydown', (e) => {{
+        if (e.key === 'Enter' || e.key === ' ') {{
+          e.preventDefault();
+          row.click();
+        }}
+      }});
     }});
     highlightActiveCue();
   }}
@@ -242,12 +261,18 @@
     if (transcriptCues.length === 0) return;
     const t = video.currentTime;
     let idx = -1;
-    for (let i = 0; i < transcriptCues.length; i++) {{
-      const cue = transcriptCues[i];
-      if (t >= cue.startTime - ANTICIPATE && t < cue.endTime + LINGER) {{
-        idx = i; break;
+    // Binary search: find last cue where startTime - ANTICIPATE <= t
+    let lo = 0, hi = transcriptCues.length - 1;
+    while (lo <= hi) {{
+      const mid = (lo + hi) >> 1;
+      if (transcriptCues[mid].startTime - ANTICIPATE <= t) {{
+        idx = mid;
+        lo = mid + 1;
+      }} else {{
+        hi = mid - 1;
       }}
     }}
+    if (idx >= 0 && !(t < transcriptCues[idx].endTime + LINGER)) idx = -1;
 
     if (idx === activeRow) return;
 
@@ -281,7 +306,14 @@
     activeRow = idx;
   }}
 
-  video.addEventListener('timeupdate', highlightActiveCue);
+  let _rafId = null;
+  video.addEventListener('timeupdate', () => {{
+    if (_rafId) return;
+    _rafId = requestAnimationFrame(() => {{
+      highlightActiveCue();
+      _rafId = null;
+    }});
+  }});
 
   function waitForCues() {{
     const track = getFirstShowingTrack();

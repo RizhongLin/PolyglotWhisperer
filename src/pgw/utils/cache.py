@@ -93,6 +93,8 @@ def find_cached_file(
         cached = cache_dir / f"{key}{suffix}"
         if cached.is_file():
             return cached
+        if cached.is_symlink():
+            cached.unlink(missing_ok=True)  # Clean up broken symlink
 
     if file_path is not None:
         try:
@@ -100,6 +102,8 @@ def find_cached_file(
             cached = cache_dir / f"{meta_key}{suffix}"
             if cached.is_file():
                 return cached
+            if cached.is_symlink():
+                cached.unlink(missing_ok=True)  # Clean up broken symlink
         except OSError:
             pass  # File may not exist for metadata stat
 
@@ -111,6 +115,24 @@ def get_cache_dir(workspace_dir: Path, category: str) -> Path:
     cache_dir = Path(workspace_dir) / ".cache" / category
     cache_dir.mkdir(parents=True, exist_ok=True)
     return cache_dir
+
+
+def atomic_write_text(path: Path, content: str, encoding: str = "utf-8") -> None:
+    """Write text atomically: write to temp file, then rename.
+
+    Prevents corrupted cache files if the process crashes mid-write.
+    """
+    import tempfile
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=path.suffix)
+    try:
+        with os.fdopen(fd, "w", encoding=encoding) as f:
+            f.write(content)
+        Path(tmp).replace(path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
 
 
 def link_or_copy(source: Path, dest: Path) -> None:

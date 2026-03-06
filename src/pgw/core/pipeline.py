@@ -10,7 +10,13 @@ from pgw.core.config import PGWConfig
 from pgw.core.events import EventCallback, PipelineEvent
 from pgw.downloader.resolver import is_url, resolve
 from pgw.utils.audio import extract_audio_cached
-from pgw.utils.cache import cache_key, find_cached_file, get_cache_dir, link_or_copy
+from pgw.utils.cache import (
+    atomic_write_text,
+    cache_key,
+    find_cached_file,
+    get_cache_dir,
+    link_or_copy,
+)
 from pgw.utils.console import cache_hit, console, debug, stage, workspace_done
 from pgw.utils.paths import create_workspace, save_metadata, workspace_paths
 
@@ -72,7 +78,9 @@ def run_pipeline(
 
     # Link video into workspace (symlink to save disk, copy as fallback)
     video_dest = paths["video"]
-    if not video_dest.is_file() and not video_dest.is_symlink():
+    if not video_dest.is_file():
+        if video_dest.is_symlink():
+            video_dest.unlink()  # Remove broken symlink
         link_or_copy(source.video_path, video_dest)
 
     # Step 3: Extract audio (with cross-workspace cache)
@@ -99,7 +107,7 @@ def run_pipeline(
         if was_cached:
             cache_hit()
     else:
-        cache_hit("Audio already extracted")
+        cache_hit("Audio cached")
     emit("audio", 1.0, "Audio ready")
 
     # Step 3.5: Use downloaded subtitles if available (skip Whisper)
@@ -156,6 +164,14 @@ def run_pipeline(
         trans_write_key = cache_key(audio_path, **trans_params)
     trans_write_path = trans_cache_dir / f"{trans_write_key}.json"
 
+    # Validate cached transcription JSON (could be corrupted from interrupted write)
+    if trans_cache_path is not None:
+        try:
+            json.loads(trans_cache_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            debug("Cached transcription corrupted, regenerating...")
+            trans_cache_path = None
+
     emit("transcribe", 0.0, "Transcribing...")
     if not vtt_path.is_file():
         if use_api and trans_cache_path is not None:
@@ -179,11 +195,9 @@ def run_pipeline(
                 content_hash=audio_identity,
             )
 
-            # Save to shared cache
+            # Save to shared cache (atomic write to prevent corruption)
             raw = [{"text": s.text, "start": s.start, "end": s.end} for s in segments]
-            trans_write_path.write_text(
-                json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
+            atomic_write_text(trans_write_path, json.dumps(raw, ensure_ascii=False, indent=2))
             debug("Transcription cached.")
 
         elif trans_cache_path is not None and needs_llm:
@@ -202,8 +216,10 @@ def run_pipeline(
 
             result = transcribe(audio_path, config.whisper)
 
-            # Save full result to shared cache
-            result.save_as_json(str(trans_write_path))
+            # Save full result to shared cache (atomic to prevent corruption)
+            tmp_path = trans_write_path.with_suffix(".tmp")
+            result.save_as_json(str(tmp_path))
+            tmp_path.replace(trans_write_path)
             debug("Transcription cached.")
 
             if needs_llm:
@@ -250,7 +266,7 @@ def run_pipeline(
             save_subtitles(segments, txt_path, fmt="txt")
             saved.append(txt_path)
     else:
-        cache_hit("Transcription already done")
+        cache_hit("Transcription cached")
         if needs_llm:
             from pgw.subtitles.converter import load_subtitles
             from pgw.transcriber.postprocess import postprocess_segments
@@ -333,7 +349,7 @@ def run_pipeline(
             except Exception as e:
                 console.print(f"[yellow]EPUB export skipped:[/yellow] {e}")
         else:
-            cache_hit("Translation already done")
+            cache_hit("Translation cached")
 
     # Step 5.5: Vocabulary summary (best-effort)
     emit("vocab", 0.0, "Generating vocabulary summary...")
