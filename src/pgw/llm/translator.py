@@ -25,7 +25,8 @@ from pgw.utils.console import chunk_progress, debug, warning
 from pgw.utils.text import SENTENCE_END_CHARS, TIMING_GAP_THRESHOLD
 
 CHUNK_SIZE = 48
-OVERLAP = 8  # Sliding window overlap — segments translated redundantly for coherence
+OVERLAP = 6  # Forward lookahead — segments translated but discarded, for boundary context
+BACK_OVERLAP = 4  # Backward re-translation — later chunk overwrites previous chunk's tail
 HISTORY_SIZE = 8  # Number of previous translated pairs to include as context
 MAX_RETRY_DEPTH = 3  # Max recursion for binary-split retries
 SCAN_RANGE = 5  # How far to scan for sentence boundaries around ideal split point
@@ -260,7 +261,9 @@ def translate_subtitles(
     """Translate subtitle segments using an LLM.
 
     Uses a sliding window with sentence-boundary-aware chunking:
-    - Chunks overlap by OVERLAP segments for boundary coherence
+    - Forward overlap: OVERLAP segments translated as lookahead but discarded
+    - Backward overlap: BACK_OVERLAP segments re-translated and overwritten,
+      so boundary segments end up mid-window with full bidirectional context
     - Split points prefer sentence endings and timing gaps
     - Preceding context shows bilingual pairs (source + translation)
     - Single retry with error feedback before binary split on mismatch
@@ -303,10 +306,16 @@ def translate_subtitles(
                 boundaries[chunk_idx + 1] if chunk_idx + 1 < len(boundaries) else len(segments)
             )
 
-            # --- Issue 1: True sliding window ---
-            # Translate a wider window including OVERLAP into the next chunk
+            # Extend window backward for non-first chunks — re-translate boundary
+            # segments that were at the tail of the previous chunk's window
+            if chunk_idx > 0:
+                translate_start = max(0, keep_start - BACK_OVERLAP)
+            else:
+                translate_start = keep_start
+
+            # Extend window forward — lookahead for boundary context
             translate_end = min(keep_end + OVERLAP, len(segments))
-            chunk = segments[keep_start:translate_end]
+            chunk = segments[translate_start:translate_end]
 
             # Build reference context
             context_parts = []
@@ -319,13 +328,12 @@ def translate_subtitles(
             if history:
                 context_parts.append(history)
 
-            # --- Issue 2: Bilingual overlap context ---
+            # Bilingual overlap context — segments before the translation window
             overlap_parts = []
-            if keep_start > 0:
-                # Preceding segments have been translated — show bilingual pairs
-                before_start = max(0, keep_start - OVERLAP)
-                before_source = [segments[j].text for j in range(before_start, keep_start)]
-                before_trans = [translated[j].text for j in range(before_start, keep_start)]
+            if translate_start > 0:
+                before_start = max(0, translate_start - OVERLAP)
+                before_source = [segments[j].text for j in range(before_start, translate_start)]
+                before_trans = [translated[j].text for j in range(before_start, translate_start)]
                 bilingual = format_bilingual_context(before_source, before_trans)
                 if bilingual:
                     overlap_parts.append(bilingual)
@@ -371,12 +379,29 @@ def translate_subtitles(
             # Reconstruct full list with empties preserved
             translated_texts = reconstruct_with_empties(texts, non_empty_idx, result_texts)
 
-            # --- Issue 1 continued: Only keep translations for [keep_start:keep_end] ---
+            # Backward overlap: overwrite previous chunk's tail with better translations
+            back_count = keep_start - translate_start
+            if back_count > 0:
+                overwrite_start = len(translated) - back_count
+                for j in range(back_count):
+                    seg = chunk[j]
+                    new_text = translated_texts[j]
+                    if new_text.strip():
+                        final_text = new_text
+                    else:
+                        final_text = translated[overwrite_start + j].text
+                    translated[overwrite_start + j] = SubtitleSegment(
+                        text=final_text,
+                        start=seg.start,
+                        end=seg.end,
+                        speaker=seg.speaker,
+                    )
+
+            # Append new translations for [keep_start:keep_end]
             keep_count = keep_end - keep_start
-            for j, (seg, new_text) in enumerate(
-                zip(chunk[:keep_count], translated_texts[:keep_count])
-            ):
-                # --- Issue 6: Mark untranslated segments ---
+            for j in range(back_count, back_count + keep_count):
+                seg = chunk[j]
+                new_text = translated_texts[j]
                 if new_text.strip():
                     final_text = new_text
                 else:
@@ -390,8 +415,8 @@ def translate_subtitles(
                     )
                 )
 
-            # Update history — only from kept translations
-            for j in range(keep_count):
+            # Update history — from overwritten + kept translations
+            for j in range(back_count + keep_count):
                 seg = chunk[j]
                 trans = translated_texts[j]
                 if seg.text.strip() and trans.strip() and not trans.startswith(UNTRANSLATED_MARKER):

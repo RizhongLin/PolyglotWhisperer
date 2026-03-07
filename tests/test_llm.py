@@ -1,4 +1,4 @@
-"""Tests for LLM cleanup and translation with mocked responses."""
+"""Tests for LLM refinement and translation with mocked responses."""
 
 from unittest.mock import patch
 
@@ -8,7 +8,9 @@ from pgw.core.config import LLMConfig
 
 
 def _mock_complete(messages, config, **kwargs):
-    """Mock LLM that returns numbered lines echoing back the input."""
+    """Mock LLM that returns a JSON object echoing back the input."""
+    import json
+
     user_msg = messages[-1]["content"]
     lines = []
     for line in user_msg.splitlines():
@@ -16,27 +18,41 @@ def _mock_complete(messages, config, **kwargs):
         if line and line[0].isdigit() and ". " in line:
             _, text = line.split(". ", 1)
             lines.append(text)
+    # Try to parse JSON input (keyed format)
+    if not lines:
+        try:
+            # Find JSON in the message
+            for part in user_msg.split("===BEGIN==="):
+                if "===END===" in part:
+                    json_str = part.split("===END===")[0].strip()
+                    data = json.loads(json_str)
+                    if isinstance(data, dict):
+                        result = {k: f"[processed] {v}" for k, v in data.items()}
+                        return json.dumps(result, ensure_ascii=False)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    # Fallback to numbered format
     return "\n".join(f"{i + 1}. [processed] {text}" for i, text in enumerate(lines))
 
 
-class TestCleanup:
-    @patch("pgw.llm.cleanup.complete", side_effect=_mock_complete)
-    def test_cleanup_preserves_timestamps(self, _mock):
-        from pgw.llm.cleanup import cleanup_subtitles
+class TestRefine:
+    @patch("pgw.llm.refine.complete", side_effect=_mock_complete)
+    def test_refine_preserves_timestamps(self, _mock):
+        from pgw.llm.refine import refine_subtitles
 
         segments = make_segments(["Hello", "World"])
-        result = cleanup_subtitles(segments, "fr", LLMConfig())
+        result = refine_subtitles(segments, "fr", LLMConfig())
 
-        for orig, cleaned in zip(segments, result):
-            assert cleaned.start == orig.start
-            assert cleaned.end == orig.end
+        for orig, refined in zip(segments, result):
+            assert refined.start == orig.start
+            assert refined.end == orig.end
 
-    @patch("pgw.llm.cleanup.complete", side_effect=Exception("LLM error"))
-    def test_cleanup_fallback_on_error(self, _mock):
-        from pgw.llm.cleanup import cleanup_subtitles
+    @patch("pgw.llm.refine.complete", side_effect=Exception("LLM error"))
+    def test_refine_fallback_on_error(self, _mock):
+        from pgw.llm.refine import refine_subtitles
 
         segments = make_segments(["Keep this", "And this"])
-        result = cleanup_subtitles(segments, "fr", LLMConfig())
+        result = refine_subtitles(segments, "fr", LLMConfig())
 
         assert result[0].text == "Keep this"
         assert result[1].text == "And this"

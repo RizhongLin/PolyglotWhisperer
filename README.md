@@ -86,6 +86,9 @@ LiteLLM routes to any provider via model prefix — set the matching API key in 
 # Full pipeline: download → transcribe → translate → play
 pgw run "https://example.com/video" --translate en --no-play
 
+# Refine transcription with LLM before translating
+pgw run "https://example.com/video" --refine --translate en --no-play
+
 # Cloud API transcription + translation (no local GPU needed)
 pgw run "https://example.com/video" --backend api --llm-backend api --translate en --no-play
 
@@ -187,7 +190,8 @@ Video/Audio/URL
   → Download (yt-dlp, cached) + fetch existing subtitles
   → Extract Audio (ffmpeg, cached)
   → Use downloaded subtitles OR Transcribe (Whisper + spaCy segmentation)
-  → Translate (LLM, optional)
+  → Refine transcription (LLM, optional — fixes ASR errors, punctuation)
+  → Translate (LLM, optional — sentence-boundary chunking with overlap)
   → Export (VTT/TXT/bilingual VTT/PDF/EPUB) + Vocabulary Analysis
   → Play (mpv or web player)
 ```

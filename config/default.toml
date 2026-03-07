@@ -11,7 +11,7 @@ model = "ollama_chat/qwen3:8b"
 api_base = "http://localhost:11434"
 temperature = 0.3
 max_tokens = 4096
-cleanup_enabled = false
+refine_enabled = false
 translation_enabled = true
 target_language = "en"
 

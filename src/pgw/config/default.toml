@@ -15,7 +15,7 @@ temperature = 0.3
 max_tokens = 16384
 timeout = 300
 num_retries = 2
-cleanup_enabled = false
+refine_enabled = false
 translation_enabled = true
 target_language = "en"
 

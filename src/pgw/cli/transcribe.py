@@ -51,13 +51,13 @@ def transcribe(
         Optional[str],
         typer.Option("--duration", help="Duration to process (e.g. '00:05:00' or '300')."),
     ] = None,
-    cleanup: Annotated[
+    refine: Annotated[
         bool,
-        typer.Option("--cleanup/--no-cleanup", help="Clean up transcription with LLM."),
+        typer.Option("--refine/--no-refine", help="Refine transcription with LLM."),
     ] = False,
     llm_model: Annotated[
         Optional[str],
-        typer.Option("--llm-model", help="LLM model for cleanup (e.g. ollama_chat/qwen3:8b)."),
+        typer.Option("--llm-model", help="LLM model for refinement (e.g. ollama_chat/qwen3:8b)."),
     ] = None,
     llm_backend: Annotated[
         Optional[str],
@@ -110,7 +110,7 @@ def transcribe(
             fmt,
             output,
             not no_txt,
-            cleanup,
+            refine,
             start,
             duration,
         )
@@ -133,7 +133,7 @@ def transcribe(
                 fmt,
                 None,
                 not no_txt,
-                cleanup,
+                refine,
                 start,
                 duration,
             )
@@ -154,7 +154,7 @@ def _transcribe_single(
     fmt: str,
     output: Path | None,
     save_txt: bool,
-    cleanup: bool,
+    refine: bool,
     start: str | None,
     duration: str | None,
 ) -> None:
@@ -201,11 +201,11 @@ def _transcribe_single(
 
             segments = postprocess_segments(segments, language)
 
-        if cleanup:
-            from pgw.llm.cleanup import cleanup_subtitles
+        if refine:
+            from pgw.llm.refine import refine_subtitles
 
-            stage("Cleaning up", config.llm.model)
-            segments = cleanup_subtitles(segments, language, config.llm)
+            stage("Refining", config.llm.model)
+            segments = refine_subtitles(segments, language, config.llm)
 
         save_subtitles(segments, sub_path, fmt=fmt)
         saved(sub_path)
@@ -228,11 +228,11 @@ def _transcribe_single(
         segments = api_transcribe(audio_path, config.whisper, config.workspace_dir)
         segments = postprocess_segments(segments, language)
 
-        if cleanup:
-            from pgw.llm.cleanup import cleanup_subtitles
+        if refine:
+            from pgw.llm.refine import refine_subtitles
 
-            stage("Cleaning up", config.llm.model)
-            segments = cleanup_subtitles(segments, language, config.llm)
+            stage("Refining", config.llm.model)
+            segments = refine_subtitles(segments, language, config.llm)
 
         save_subtitles(segments, sub_path, fmt=fmt)
     else:
@@ -241,15 +241,15 @@ def _transcribe_single(
 
         result = do_transcribe(audio_path, config.whisper)
 
-        if cleanup:
-            from pgw.llm.cleanup import cleanup_subtitles
+        if refine:
+            from pgw.llm.refine import refine_subtitles
             from pgw.subtitles.converter import result_to_segments, save_subtitles
             from pgw.transcriber.postprocess import postprocess_segments
 
             segments = result_to_segments(result)
             segments = postprocess_segments(segments, language)
-            stage("Cleaning up", config.llm.model)
-            segments = cleanup_subtitles(segments, language, config.llm)
+            stage("Refining", config.llm.model)
+            segments = refine_subtitles(segments, language, config.llm)
             save_subtitles(segments, sub_path, fmt=fmt)
         else:
             if fmt in ("srt", "vtt"):
@@ -265,7 +265,7 @@ def _transcribe_single(
     if save_txt:
         txt_path = sub_path.with_suffix(".txt")
         if txt_path != sub_path:
-            if use_api or cleanup:
+            if use_api or refine:
                 from pgw.subtitles.converter import save_subtitles
 
                 save_subtitles(segments, txt_path, fmt="txt")

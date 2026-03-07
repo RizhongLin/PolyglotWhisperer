@@ -30,6 +30,13 @@ _CEFR_ORDER = {"A1": 1, "A2": 2, "B1": 3, "B2": 4, "C1": 5, "C2": 6}
 # Characters that indicate abbreviations or artifacts, not learnable vocabulary
 _ARTIFACT_CHARS = frozenset(".-/\\@#")
 
+# Words with zipf=0 are likely ASR errors or unknown tokens, not real vocabulary
+_MIN_ZIPF = 0.5
+
+# Percentile of hardest vocabulary used for difficulty estimation.
+# A text's difficulty comes from its hard words, not that it also uses "the" and "is".
+_DIFFICULTY_PERCENTILE = 0.10  # top 10% hardest known words
+
 
 def _is_learnable(token) -> bool:
     """Return True if the token is learnable vocabulary (not an artifact)."""
@@ -139,25 +146,31 @@ def generate_vocab_summary(
                 translation=translation,
             )
 
-    # Compute estimated video level — weighted by occurrence count so that
-    # common A1/A2 words (appearing 10+ times) outweigh rare C2 hapax legomena.
+    # Estimate video difficulty from the hardest real vocabulary.
+    # Filter out zipf=0 (ASR errors, unknown tokens) and use the top percentile
+    # of known words — a news broadcast's difficulty is defined by words like
+    # "extradition" and "belligérant", not by the fact it also uses "le" and "de".
     if lemma_key_to_info:
-        total_weight = sum(info.count for info in lemma_key_to_info.values())
-        weighted_sum = sum(
-            _CEFR_ORDER[info.cefr] * info.count for info in lemma_key_to_info.values()
-        )
-        avg_level = weighted_sum / total_weight
+        known_words = [info for info in lemma_key_to_info.values() if info.zipf >= _MIN_ZIPF]
+        if known_words:
+            known_words.sort(key=lambda w: w.zipf)
+            n_hard = max(1, int(len(known_words) * _DIFFICULTY_PERCENTILE))
+            hardest = known_words[:n_hard]
+            total_weight = sum(w.count for w in hardest)
+            weighted_sum = sum(_CEFR_ORDER[w.cefr] * w.count for w in hardest)
+            avg_level = weighted_sum / total_weight
+        else:
+            avg_level = 1.0
         level_names = list(_CEFR_ORDER.keys())
         level_idx = min(max(round(avg_level) - 1, 0), len(level_names) - 1)
         estimated_level = level_names[level_idx]
     else:
         estimated_level = "A1"
 
-    # Sort by zipf ascending (rarest first), then by count descending
-    sorted_words = sorted(
-        lemma_key_to_info.values(),
-        key=lambda w: (w.zipf, -w.count),
-    )
+    # Sort by zipf ascending (rarest first), then by count descending.
+    # Exclude zipf=0 words — these are ASR errors, not real vocabulary.
+    real_words = [w for w in lemma_key_to_info.values() if w.zipf >= _MIN_ZIPF]
+    sorted_words = sorted(real_words, key=lambda w: (w.zipf, -w.count))
     top_rare = sorted_words[:top_n]
 
     return {

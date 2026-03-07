@@ -52,7 +52,7 @@ class LLMConfig(BackendConfig):
     max_tokens: int = 16384
     timeout: int = 300
     num_retries: int = 2
-    cleanup_enabled: bool = False
+    refine_enabled: bool = False
     translation_enabled: bool = True
     target_language: str = "en"
 

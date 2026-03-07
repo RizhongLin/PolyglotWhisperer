@@ -1,42 +1,62 @@
-"""Prompt templates for subtitle cleanup and translation."""
+"""Prompt templates for subtitle refinement and translation."""
 
 import json
 
 # Prefix for segments where translation failed or was missing
 UNTRANSLATED_MARKER = "[?] "
 
-CLEANUP_SYSTEM = """\
-You are a subtitle editor. Your task is to clean up automatic speech recognition (ASR) \
-output while preserving the original meaning and timing structure.
+REFINE_SYSTEM = """\
+You are a professional subtitle editor. Your task is to refine automatic \
+speech recognition (ASR) output into broadcast-quality subtitles.
 
-Rules:
-- First check if each line actually contains errors before modifying it. \
-If a line is already correct, return it unchanged.
-- Fix spelling and grammar errors from ASR mistakes
-- Remove filler words (euh, hum, ah, um) unless they carry meaning
-- Normalize punctuation (proper sentence endings, quotation marks)
-- Do NOT merge or split segments — return the EXACT same number of lines
+Strict 1:1 mapping:
+- The output MUST contain EVERY key from the input ("1", "2", ..., "N"). \
+No key may be skipped, merged, or left empty.
+- These are timed subtitles — each segment is synced to audio. \
+Merging or splitting segments would break the timing.
+
+What to fix:
+- ASR transcription errors (misheard words, homophone mistakes)
+- Missing or incorrect accents and diacritics (e.g. "tres" → "très")
+- Missing or incorrect punctuation (sentence endings, commas, hyphens)
+- Filler words and hesitations (euh, hum, ah, um) — remove unless \
+they carry meaning or are part of a quote
+- Capitalization errors (sentence starts, proper nouns)
+- Missing hyphens in compound expressions (e.g. "peut être" → "peut-être")
+
+What NOT to do:
 - Do NOT translate — keep the original language
-- Do NOT add information that wasn't in the original
-- Return ONLY the cleaned lines, numbered exactly as the input
+- Do NOT rephrase, paraphrase, or rewrite — preserve the speaker's words
+- Do NOT add information, context, or explanation
+- Do NOT merge or split segments
+- If a line is already correct, return it unchanged
 
-Examples:
-Input:
-1. euh bonjour comment allez vous
-2. je suis tres content de vous voire
-3. merci beaucoup pour votre aide
+Cross-segment awareness:
+- Consecutive segments are often parts of the same sentence. \
+Read them together to understand context before correcting.
+- Use context to resolve ambiguous ASR errors \
+(e.g. "mer" vs "mère" vs "maire" depends on surrounding words).
 
-Output:
-1. Bonjour, comment allez-vous ?
-2. Je suis très content de vous voir.
-3. Merci beaucoup pour votre aide.
+Output format — return a JSON object with the SAME numbered keys as the input:
+{{"1": "refined text 1", "2": "refined text 2", ...}}
+
+Example:
+Input: {{"1": "euh bonjour comment allez vous", \
+"2": "je suis tres content de vous voire", \
+"3": "merci beaucoup pour votre aide"}}
+Output: {{"1": "Bonjour, comment allez-vous ?", \
+"2": "Je suis très content de vous voir.", \
+"3": "Merci beaucoup pour votre aide."}}
 """
 
-CLEANUP_USER = """\
-Clean up these {count} subtitle segments in {language}. \
-Return exactly {count} numbered lines, one per input line.
+REFINE_USER = """\
+Refine these {count} subtitle segments in {language}. \
+Return a JSON object with EXACTLY {count} keys ("1" through "{count}"). \
+Every key must appear — do NOT merge segments.
 
-{numbered_segments}
+{context}===BEGIN===
+{json_segments}
+===END===
 """
 
 TRANSLATION_SYSTEM = """\
@@ -215,7 +235,7 @@ def parse_json_response(response: str, expected_count: int) -> tuple[list[str], 
 
     # Fallback: array format {"translations": ["t1", "t2", ...]}
     translations = None
-    for key in ("translations", "translated", "results"):
+    for key in ("translations", "translated", "results", "refined"):
         if key in data and isinstance(data[key], list):
             translations = data[key]
             break

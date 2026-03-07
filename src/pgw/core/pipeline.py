@@ -31,7 +31,7 @@ def run_pipeline(
     input_path: str,
     config: PGWConfig,
     translate: str | None = None,
-    cleanup: bool = True,
+    refine: bool = True,
     play: bool = True,
     start: str | None = None,
     duration: str | None = None,
@@ -44,7 +44,7 @@ def run_pipeline(
         input_path: URL or local file path.
         config: Full application config.
         translate: Target language code, or None to skip translation.
-        cleanup: Whether to clean up transcription with LLM.
+        refine: Whether to refine transcription with LLM.
         play: Whether to play the video with subtitles after processing.
         start: Start time for audio clipping (ffmpeg format).
         duration: Duration to extract (ffmpeg format).
@@ -136,7 +136,7 @@ def run_pipeline(
         emit("transcribe", 1.0, "Downloaded subtitles ready")
 
     # Step 4: Transcribe (with shared cache)
-    needs_llm = (cleanup and config.llm.cleanup_enabled) or translate
+    needs_llm = (refine and config.llm.refine_enabled) or translate
     llm_was_used = False
     use_api = config.whisper.backend == "api"
 
@@ -248,20 +248,20 @@ def run_pipeline(
 
             segments = postprocess_segments(segments, language)
 
-            if cleanup and config.llm.cleanup_enabled:
-                from pgw.llm.cleanup import cleanup_subtitles
+            if refine and config.llm.refine_enabled:
+                from pgw.llm.refine import refine_subtitles
 
-                emit("transcribe", 0.5, "Cleaning up transcription...")
-                stage("Cleaning up", config.llm.model)
+                emit("transcribe", 0.5, "Refining transcription...")
+                stage("Refining", config.llm.model)
 
-                def _on_cleanup_progress(frac: float) -> None:
-                    emit("transcribe", 0.5 + frac * 0.5, f"Cleaning ({frac:.0%})...")
+                def _on_refine_progress(frac: float) -> None:
+                    emit("transcribe", 0.5 + frac * 0.5, f"Refining ({frac:.0%})...")
 
-                segments = cleanup_subtitles(
+                segments = refine_subtitles(
                     segments,
                     language,
                     config.llm,
-                    on_progress=_on_cleanup_progress,
+                    on_progress=_on_refine_progress,
                 )
                 llm_was_used = True
 
@@ -396,7 +396,7 @@ def run_pipeline(
         title=title,
         language=language,
         target_language=translate,
-        cleanup=cleanup,
+        refine=refine,
         whisper_model=config.whisper.model,
         whisper_device=config.whisper.device,
         llm_model=config.llm.model,

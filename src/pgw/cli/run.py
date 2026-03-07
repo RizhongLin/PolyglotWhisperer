@@ -31,9 +31,9 @@ def run(
         str,
         typer.Option(help="Compute device: cpu, cuda, mps, or auto."),
     ] = "auto",
-    cleanup: Annotated[
+    refine: Annotated[
         bool,
-        typer.Option("--cleanup/--no-cleanup", help="Clean up transcription with LLM."),
+        typer.Option("--refine/--no-refine", help="Refine transcription with LLM."),
     ] = False,
     start: Annotated[
         Optional[str],
@@ -113,7 +113,7 @@ def run(
             input_path=expanded[0],
             config=config,
             translate=translate,
-            cleanup=cleanup,
+            refine=refine,
             play=not no_play,
             start=start,
             duration=duration,
@@ -132,7 +132,7 @@ def run(
                 input_path=input_path,
                 config=config,
                 translate=translate,
-                cleanup=cleanup,
+                refine=refine,
                 play=False,  # Never auto-play in batch mode
                 start=start,
                 duration=duration,
