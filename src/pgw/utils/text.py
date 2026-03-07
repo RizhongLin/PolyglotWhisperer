@@ -1,4 +1,4 @@
-"""Shared text processing constants.
+"""Shared text processing constants and helpers.
 
 Centralised definitions for punctuation sets, apostrophes, timing
 thresholds, and formatting constants used across multiple modules.

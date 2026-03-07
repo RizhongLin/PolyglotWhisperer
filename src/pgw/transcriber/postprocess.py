@@ -34,6 +34,19 @@ from pgw.utils.text import (
 _DANGLING_POS = {"DET", "ADP", "CCONJ", "SCONJ", "AUX"}
 
 
+def _is_dangling(token) -> bool:
+    """Check if a token should not dangle at the end of a subtitle segment.
+
+    Catches function words (DET, ADP, CCONJ, SCONJ, AUX) and relative
+    pronouns (qui, où, dont, laquelle, etc. — identified by PronType=Rel).
+    """
+    if token.pos_ in _DANGLING_POS:
+        return True
+    if token.pos_ == "PRON" and token.morph.get("PronType") == ["Rel"]:
+        return True
+    return False
+
+
 def regroup_for_subtitles(result, max_chars: int = MAX_SEGMENT_CHARS) -> None:
     """Rebuild segments from word-level timestamps for subtitle display.
 
@@ -124,12 +137,85 @@ def fix_overlapping_timestamps(
     return segments
 
 
+def fix_false_sentence_breaks(
+    segments: list[SubtitleSegment],
+    language: str,
+) -> list[SubtitleSegment]:
+    """Merge segments that were falsely split at abbreviation periods.
+
+    Uses spaCy's sentence segmenter as the oracle: joins each segment's
+    text with the next, and if spaCy sees them as one sentence (i.e. the
+    first token of the next segment is NOT a sentence start), merges the
+    segments back together — provided the combined length stays within
+    MAX_SEGMENT_CHARS + MERGE_CHAR_SLACK.
+
+    This fixes splits like ``M. | Macron`` or ``Dr. | Dupont`` without
+    hardcoding abbreviation lists.
+    """
+    nlp = load_spacy_model(language, enable_parser=True)
+    if nlp is None:
+        return segments
+
+    merge_limit = MAX_SEGMENT_CHARS + MERGE_CHAR_SLACK
+    fixed = list(segments)
+    i = 0
+    merged_count = 0
+
+    while i < len(fixed) - 1:
+        cur_text = fixed[i].text.strip()
+        next_text = fixed[i + 1].text.strip()
+
+        # Only check segments where current ends with sentence-end punctuation
+        if not cur_text or cur_text[-1] not in SENTENCE_END_CHARS:
+            i += 1
+            continue
+
+        combined = cur_text + " " + next_text
+        if len(combined) > merge_limit:
+            i += 1
+            continue
+
+        doc = nlp(combined)
+        # Find the token that starts the next segment's text
+        cur_char_end = len(cur_text) + 1  # +1 for the joining space
+        false_break = False
+        for token in doc:
+            if token.idx >= cur_char_end:
+                # If this token is NOT a sentence start, the split was false.
+                # is_sent_start is True/False/None — only True means real boundary.
+                if token.is_sent_start is not True:
+                    false_break = True
+                break
+
+        if false_break:
+            # Merge: combine text, take timing from both
+            fixed[i] = SubtitleSegment(
+                text=combined,
+                start=fixed[i].start,
+                end=fixed[i + 1].end,
+                speaker=fixed[i].speaker,
+            )
+            fixed.pop(i + 1)
+            merged_count += 1
+            # Don't advance — check if next segment also merges
+        else:
+            i += 1
+
+    if merged_count:
+        from pgw.utils.console import debug
+
+        debug(f"Merged {merged_count} false sentence break(s) (abbreviations).")
+
+    return fixed
+
+
 def postprocess_segments(
     segments: list[SubtitleSegment],
     language: str,
 ) -> list[SubtitleSegment]:
-    """Apply standard postprocessing: fix overlaps, then fix dangling clitics."""
+    """Apply standard postprocessing: fix overlaps, abbreviations, then danglers."""
     segments = fix_overlapping_timestamps(segments)
+    segments = fix_false_sentence_breaks(segments, language)
     segments = fix_dangling_clitics(segments, language)
     return segments
 
@@ -170,9 +256,9 @@ def fix_dangling_function_words(result, language: str) -> None:
         if not doc:
             continue
 
-        # Check if the last token is a function word (DET or ADP)
+        # Check if the last token is a dangling function word or relative pronoun
         last_token = doc[-1]
-        if last_token.pos_ not in _DANGLING_POS:
+        if not _is_dangling(last_token):
             continue
 
         # Move word from end of current segment to start of next
@@ -194,10 +280,11 @@ def fix_dangling_clitics(segments: list[SubtitleSegment], language: str) -> list
     SubtitleSegment text (no WhisperResult/word objects needed). Suitable
     for the API transcription path.
 
-    Detects two patterns:
+    Detects three patterns:
     1. Text ending with an apostrophe (Romance clitics: l', d', qu', etc.)
        — uses simple text check, handles spaCy splitting "l'" into ["l", "'"]
     2. Trailing function word POS tags (DET, ADP, CCONJ, SCONJ, AUX) — uses spaCy
+    3. Trailing relative pronouns (qui, où, dont, etc. — PronType=Rel) — uses spaCy
     """
     nlp = load_spacy_model(language)
     if nlp is None:
@@ -224,13 +311,13 @@ def fix_dangling_clitics(segments: list[SubtitleSegment], language: str) -> list
                 fixed[i + 1].text = text + fixed[i + 1].text.lstrip()
             continue
 
-        # Pattern 2: trailing DET/ADP via spaCy POS tagging
+        # Pattern 2: trailing function word or relative pronoun via spaCy
         doc = nlp(text)
         if not doc or len(doc) <= 1:
             continue
 
         last_token = doc[-1]
-        if last_token.pos_ not in _DANGLING_POS:
+        if not _is_dangling(last_token):
             continue
 
         # Move the dangling token text to the next segment

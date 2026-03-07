@@ -1,8 +1,14 @@
 """Tests for API transcription regrouping, response parsing, and postprocessing."""
 
+import pytest
+
 from pgw.core.models import SubtitleSegment
 from pgw.transcriber.api import regroup_words, response_to_segments
-from pgw.transcriber.postprocess import fix_overlapping_timestamps
+from pgw.transcriber.postprocess import (
+    fix_dangling_clitics,
+    fix_false_sentence_breaks,
+    fix_overlapping_timestamps,
+)
 
 
 class TestRegroupWords:
@@ -293,6 +299,128 @@ class TestFixOverlappingTimestamps:
 
     def test_empty_list(self):
         assert fix_overlapping_timestamps([]) == []
+
+
+def _has_spacy_fr() -> bool:
+    try:
+        import spacy
+
+        spacy.load("fr_core_news_sm", disable=["ner"])
+        return True
+    except Exception:
+        return False
+
+
+skip_no_spacy_fr = pytest.mark.skipif(not _has_spacy_fr(), reason="spaCy fr model not available")
+
+
+class TestFixFalseSentenceBreaks:
+    """Test spaCy-based abbreviation merge."""
+
+    @skip_no_spacy_fr
+    def test_title_abbreviation_merged(self):
+        """M. Macron split across segments should be merged."""
+        segs = [
+            SubtitleSegment(text="le président M.", start=0, end=1),
+            SubtitleSegment(text="Macron a parlé.", start=1, end=2),
+        ]
+        result = fix_false_sentence_breaks(segs, "fr")
+        assert len(result) == 1
+        assert "M. Macron" in result[0].text
+
+    @skip_no_spacy_fr
+    def test_dr_abbreviation_merged(self):
+        """Dr. Dupont split across segments should be merged."""
+        segs = [
+            SubtitleSegment(text="Le Dr.", start=0, end=1),
+            SubtitleSegment(text="Dupont est arrivé.", start=1, end=2),
+        ]
+        result = fix_false_sentence_breaks(segs, "fr")
+        assert len(result) == 1
+        assert "Dr. Dupont" in result[0].text
+
+    @skip_no_spacy_fr
+    def test_real_sentence_break_preserved(self):
+        """Real sentence boundaries should not be merged."""
+        segs = [
+            SubtitleSegment(text="Il fait beau.", start=0, end=1),
+            SubtitleSegment(text="Elle est contente.", start=1, end=2),
+        ]
+        result = fix_false_sentence_breaks(segs, "fr")
+        assert len(result) == 2
+
+    @skip_no_spacy_fr
+    def test_no_cascade_merge(self):
+        """Abbreviation merge should not cascade into the next real sentence."""
+        segs = [
+            SubtitleSegment(text="le président M.", start=0, end=1),
+            SubtitleSegment(text="Macron a parlé.", start=1, end=2),
+            SubtitleSegment(text="Il a dit bonjour.", start=2, end=3),
+        ]
+        result = fix_false_sentence_breaks(segs, "fr")
+        assert len(result) == 2
+        assert "M. Macron" in result[0].text
+        assert result[1].text == "Il a dit bonjour."
+
+    @skip_no_spacy_fr
+    def test_timestamps_preserved(self):
+        """Merged segment should span both original timestamps."""
+        segs = [
+            SubtitleSegment(text="M.", start=1.0, end=1.5),
+            SubtitleSegment(text="Dupont parle.", start=1.5, end=3.0),
+        ]
+        result = fix_false_sentence_breaks(segs, "fr")
+        assert len(result) == 1
+        assert result[0].start == 1.0
+        assert result[0].end == 3.0
+
+
+class TestFixDanglingRelativePronouns:
+    """Test that relative pronouns (qui, où, dont) are moved to next segment."""
+
+    @skip_no_spacy_fr
+    def test_qui_moved(self):
+        """Trailing 'qui' should move to the next segment."""
+        segs = [
+            SubtitleSegment(text="les personnes qui", start=0, end=1),
+            SubtitleSegment(text="sont arrivées hier.", start=1, end=2),
+        ]
+        result = fix_dangling_clitics(segs, "fr")
+        assert result[0].text == "les personnes"
+        assert result[1].text.startswith("qui")
+
+    @skip_no_spacy_fr
+    def test_ou_relative_moved(self):
+        """Trailing 'où' (relative) should move to the next segment."""
+        segs = [
+            SubtitleSegment(text="la ville où", start=0, end=1),
+            SubtitleSegment(text="il habite est belle.", start=1, end=2),
+        ]
+        result = fix_dangling_clitics(segs, "fr")
+        assert result[0].text == "la ville"
+        assert result[1].text.startswith("où")
+
+    @skip_no_spacy_fr
+    def test_dont_moved(self):
+        """Trailing 'dont' should move to the next segment."""
+        segs = [
+            SubtitleSegment(text="le sujet dont", start=0, end=1),
+            SubtitleSegment(text="on parle est important.", start=1, end=2),
+        ]
+        result = fix_dangling_clitics(segs, "fr")
+        assert result[0].text == "le sujet"
+        assert result[1].text.startswith("dont")
+
+    @skip_no_spacy_fr
+    def test_personal_pronoun_not_moved(self):
+        """Personal pronouns (il, je) should NOT be moved."""
+        segs = [
+            SubtitleSegment(text="et puis il", start=0, end=1),
+            SubtitleSegment(text="a dit bonjour.", start=1, end=2),
+        ]
+        result = fix_dangling_clitics(segs, "fr")
+        # 'il' is a personal pronoun (PronType != Rel), should stay
+        assert "il" in result[0].text
 
 
 class _MockResponse:

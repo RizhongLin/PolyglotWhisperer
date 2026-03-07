@@ -48,6 +48,7 @@ SPACY_MODELS: dict[str, str] = {
 # Separate caches for different configurations
 _cache_pos_only: dict[str, object] = {}
 _cache_with_lemma: dict[str, object] = {}
+_cache_with_parser: dict[str, object] = {}
 
 
 def _install_spacy_model(model_name: str) -> None:
@@ -58,19 +59,30 @@ def _install_spacy_model(model_name: str) -> None:
         raise RuntimeError(result.stderr)
 
 
-def load_spacy_model(language: str, enable_lemmatizer: bool = False):
+def load_spacy_model(
+    language: str,
+    enable_lemmatizer: bool = False,
+    enable_parser: bool = False,
+):
     """Load a spaCy model, auto-downloading if needed.
 
     Args:
         language: ISO 639-1 language code (e.g. "fr", "en").
         enable_lemmatizer: If True, keeps the lemmatizer enabled (for vocab
             analysis). If False, disables it for faster POS-only processing.
+        enable_parser: If True, keeps the parser enabled (for sentence
+            boundary detection). If False, disables it for faster processing.
 
     Returns:
         The loaded spaCy Language model, or None if spaCy is not installed
         or the language has no model available.
     """
-    cache = _cache_with_lemma if enable_lemmatizer else _cache_pos_only
+    if enable_parser:
+        cache = _cache_with_parser
+    elif enable_lemmatizer:
+        cache = _cache_with_lemma
+    else:
+        cache = _cache_pos_only
 
     if language in cache:
         return cache[language]
@@ -86,7 +98,11 @@ def load_spacy_model(language: str, enable_lemmatizer: bool = False):
         cache[language] = None
         return None
 
-    disable = ["parser", "ner"] if enable_lemmatizer else ["parser", "lemmatizer", "ner"]
+    disable = ["ner"]
+    if not enable_parser:
+        disable.append("parser")
+    if not enable_lemmatizer:
+        disable.append("lemmatizer")
 
     try:
         nlp = spacy.load(model_name, disable=disable)
