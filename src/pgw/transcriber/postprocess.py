@@ -17,8 +17,10 @@ from pgw.utils.text import (
     MAX_MERGE_TRAIL_WORDS,
     MAX_SEGMENT_CHARS,
     MAX_SEGMENT_DURATION,
+    MAX_WORDS_GAP_MERGE,
     MERGE_CHAR_SLACK,
     MERGE_GAP_THRESHOLD,
+    MIN_WORDS_CLAUSE_SPLIT,
     SENTENCE_END_CHARS,
     SPEECH_GAP_THRESHOLD,
 )
@@ -44,13 +46,15 @@ def regroup_for_subtitles(result, max_chars: int = MAX_SEGMENT_CHARS) -> None:
     result.merge_all_segments()
     result.split_by_punctuation([(".", " "), "?", "!", "。", "？", "！"])
     result.split_by_gap(SPEECH_GAP_THRESHOLD)
-    result.split_by_punctuation([(",", " "), ";", "，", "；"], min_words=4)
+    result.split_by_punctuation([(",", " "), ";", "，", "；"], min_words=MIN_WORDS_CLAUSE_SPLIT)
     result.split_by_length(max_chars=max_chars)
     try:
         result.split_by_duration(max_dur=MAX_SEGMENT_DURATION)
     except ValueError:
         warning("split_by_duration skipped (1-word segment edge case).")
-    result.merge_by_gap(MERGE_GAP_THRESHOLD, max_words=3, max_chars=max_chars, is_sum_max=True)
+    result.merge_by_gap(
+        MERGE_GAP_THRESHOLD, max_words=MAX_WORDS_GAP_MERGE, max_chars=max_chars, is_sum_max=True
+    )
     _merge_short_trailing(result, max_chars)
     result.clamp_max()
 

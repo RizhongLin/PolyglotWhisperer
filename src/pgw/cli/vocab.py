@@ -9,6 +9,12 @@ import typer
 from rich.table import Table
 
 from pgw.utils.console import console, error, saved, stage
+from pgw.utils.paths import (
+    GLOB_TRANSCRIPTION_VTT,
+    GLOB_TRANSLATION_VTT,
+    GLOB_VOCABULARY_JSON,
+    STEM_VOCABULARY,
+)
 
 
 def vocab(
@@ -39,12 +45,12 @@ def vocab(
 def _load_existing_summary(workspace: Path, language: str | None) -> dict | None:
     """Try loading a pre-generated vocabulary JSON from the workspace."""
     if language:
-        path = workspace / f"vocabulary.{language}.json"
+        path = workspace / f"{STEM_VOCABULARY}.{language}.json"
         if path.is_file():
             return json.loads(path.read_text(encoding="utf-8"))
     else:
         # Find any vocabulary.*.json
-        for path in sorted(workspace.glob("vocabulary.*.json")):
+        for path in sorted(workspace.glob(GLOB_VOCABULARY_JSON)):
             return json.loads(path.read_text(encoding="utf-8"))
     return None
 
@@ -54,7 +60,7 @@ def _generate_from_workspace(workspace: Path, language: str | None, top: int) ->
     from pgw.subtitles.converter import load_subtitles
 
     # Detect language from subtitle filename if not specified
-    vtt_files = list(workspace.glob("transcription.*.vtt"))
+    vtt_files = list(workspace.glob(GLOB_TRANSCRIPTION_VTT))
     if not vtt_files:
         return None
 
@@ -68,7 +74,7 @@ def _generate_from_workspace(workspace: Path, language: str | None, top: int) ->
 
     # Try loading translations
     translated_segments = None
-    trans_files = list(workspace.glob("translation.*.vtt"))
+    trans_files = list(workspace.glob(GLOB_TRANSLATION_VTT))
     if trans_files:
         translated_segments = load_subtitles(trans_files[0])
 
@@ -83,7 +89,7 @@ def _generate_from_workspace(workspace: Path, language: str | None, top: int) ->
     )
 
     # Save for future use
-    out_path = workspace / f"vocabulary.{language}.json"
+    out_path = workspace / f"{STEM_VOCABULARY}.{language}.json"
     out_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     saved(out_path)
 

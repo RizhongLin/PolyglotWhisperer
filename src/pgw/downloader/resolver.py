@@ -8,6 +8,10 @@ from urllib.parse import urlparse
 from pgw.core.models import VideoSource
 from pgw.utils.cache import file_hash
 from pgw.utils.console import debug
+from pgw.utils.text import BYTES_PER_MB
+
+# Show "Indexing file..." debug message for files larger than this
+_DEBUG_SIZE_THRESHOLD = 100 * BYTES_PER_MB
 
 
 def is_url(input_path: str) -> bool:
@@ -50,8 +54,7 @@ def resolve(
     if not path.is_file():
         raise FileNotFoundError(f"File not found: {input_path}")
 
-    size_mb = path.stat().st_size / (1024 * 1024)
-    if size_mb > 100:
+    if path.stat().st_size > _DEBUG_SIZE_THRESHOLD:
         debug("Indexing file...")
     content_hash = file_hash(path)
 

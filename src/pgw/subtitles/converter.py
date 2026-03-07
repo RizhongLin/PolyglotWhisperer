@@ -19,6 +19,10 @@ from pgw.core.models import SubtitleSegment
 
 logger = logging.getLogger(__name__)
 
+# VTT line positioning for bilingual subtitles (percentage from top)
+_BILINGUAL_ORIGINAL_LINE = 85  # Original text at bottom
+_BILINGUAL_TRANSLATION_LINE = 5  # Translation at top
+
 # VTT inline timestamp cues: <00:00:13.120>
 _VTT_CUE_RE = re.compile(r"<\d{2}:\d{2}[:\.][\d.]+>")
 
@@ -95,13 +99,13 @@ def save_bilingual_vtt(
 
         # Original at bottom
         lines.append(str(i * 2 - 1))
-        lines.append(f"{start} --> {end} line:85%")
+        lines.append(f"{start} --> {end} line:{_BILINGUAL_ORIGINAL_LINE}%")
         lines.append(orig.text)
         lines.append("")
 
         # Translation at top
         lines.append(str(i * 2))
-        lines.append(f"{start} --> {end} line:5%")
+        lines.append(f"{start} --> {end} line:{_BILINGUAL_TRANSLATION_LINE}%")
         lines.append(trans.text)
         lines.append("")
 

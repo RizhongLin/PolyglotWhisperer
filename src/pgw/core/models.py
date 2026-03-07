@@ -38,3 +38,7 @@ class VideoSource:
     content_hash: str | None = None
     subtitle_path: Path | None = None  # Downloaded subtitle file (VTT/SRT)
     subtitle_is_auto: bool = False  # True = auto-generated, False = human-made
+    upload_date: str | None = None  # YYYYMMDD from source platform
+    uploader: str | None = None  # Channel or uploader name
+    thumbnail: str | None = None  # Thumbnail URL
+    description: str | None = None  # Video description

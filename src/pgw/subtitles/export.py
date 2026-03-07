@@ -7,12 +7,16 @@ import html
 from pathlib import Path
 
 from pgw.core.models import SubtitleSegment
+from pgw.utils.text import SECONDS_PER_MINUTE
+
+# Segments per EPUB chapter — keeps chapter size manageable for e-readers
+EPUB_SEGMENTS_PER_CHAPTER = 100
 
 
 def _format_timestamp(seconds: float) -> str:
     """Format seconds as MM:SS for display."""
-    m = int(seconds // 60)
-    s = int(seconds % 60)
+    m = int(seconds // SECONDS_PER_MINUTE)
+    s = int(seconds % SECONDS_PER_MINUTE)
     return f"{m:02d}:{s:02d}"
 
 
@@ -169,11 +173,10 @@ td { padding: 4px 8px; vertical-align: top; border-bottom: 1px solid #eee; }
     book.add_item(style)
 
     # Split into chapters
-    chunk_size = 100
     chapters = []
-    for ch_idx in range(0, len(original), chunk_size):
-        ch_orig = original[ch_idx : ch_idx + chunk_size]
-        ch_trans = translated[ch_idx : ch_idx + chunk_size]
+    for ch_idx in range(0, len(original), EPUB_SEGMENTS_PER_CHAPTER):
+        ch_orig = original[ch_idx : ch_idx + EPUB_SEGMENTS_PER_CHAPTER]
+        ch_trans = translated[ch_idx : ch_idx + EPUB_SEGMENTS_PER_CHAPTER]
 
         start_ts = _format_timestamp(ch_orig[0].start)
         end_ts = _format_timestamp(ch_orig[-1].end)
@@ -185,7 +188,7 @@ td { padding: 4px 8px; vertical-align: top; border-bottom: 1px solid #eee; }
 
         chapter = epub.EpubHtml(
             title=ch_title,
-            file_name=f"ch_{ch_idx // chunk_size:03d}.xhtml",
+            file_name=f"ch_{ch_idx // EPUB_SEGMENTS_PER_CHAPTER:03d}.xhtml",
             lang=source_lang,
         )
         chapter.content = (

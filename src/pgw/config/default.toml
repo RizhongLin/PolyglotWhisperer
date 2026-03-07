@@ -21,7 +21,7 @@ target_language = "en"
 
 [download]
 format = "bv*[ext=mp4]+ba[ext=m4a]/bv*+ba/b"
-subtitles = true
+subtitles = false
 
 [player]
 backend = "mpv"

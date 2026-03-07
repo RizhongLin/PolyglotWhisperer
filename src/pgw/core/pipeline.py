@@ -18,7 +18,13 @@ from pgw.utils.cache import (
     link_or_copy,
 )
 from pgw.utils.console import cache_hit, debug, stage, warning, workspace_done
-from pgw.utils.paths import create_workspace, save_metadata, workspace_paths
+from pgw.utils.paths import (
+    STEM_PARALLEL,
+    STEM_VOCABULARY,
+    create_workspace,
+    save_metadata,
+    workspace_paths,
+)
 
 
 def run_pipeline(
@@ -316,7 +322,7 @@ def run_pipeline(
             try:
                 from pgw.subtitles.export import export_parallel_pdf
 
-                pdf_path = workspace / f"parallel.{language}-{translate}.pdf"
+                pdf_path = workspace / f"{STEM_PARALLEL}.{language}-{translate}.pdf"
                 export_parallel_pdf(
                     segments,
                     trans_result.translated,
@@ -334,7 +340,7 @@ def run_pipeline(
             try:
                 from pgw.subtitles.export import export_parallel_epub
 
-                epub_path = workspace / f"parallel.{language}-{translate}.epub"
+                epub_path = workspace / f"{STEM_PARALLEL}.{language}-{translate}.epub"
                 export_parallel_epub(
                     segments,
                     trans_result.translated,
@@ -365,7 +371,7 @@ def run_pipeline(
 
         summary = generate_vocab_summary(segments, language, translated_segments=trans_segs)
 
-        summary_path = workspace / f"vocabulary.{language}.json"
+        summary_path = workspace / f"{STEM_VOCABULARY}.{language}.json"
         summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
         saved.append(summary_path)
         stage(
@@ -399,6 +405,10 @@ def run_pipeline(
         start=start,
         duration=duration,
         source_duration=source.duration,
+        upload_date=source.upload_date,
+        uploader=source.uploader,
+        thumbnail=source.thumbnail,
+        description=source.description,
     )
 
     # Step 7: Optional playback

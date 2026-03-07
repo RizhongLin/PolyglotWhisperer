@@ -10,7 +10,7 @@
 
 - **Whisper transcription** with word-level timestamps — local (stable-ts, MLX/CUDA/CPU) or cloud API (Groq, OpenAI via LiteLLM)
 - **Smart subtitle segmentation** — spaCy POS tagging fixes dangling articles, prepositions, and Romance clitics (l', d', qu') across 26 languages
-- **Subtitle download** — grabs existing subtitles from YouTube/etc. via yt-dlp (human-made preferred), skips Whisper when available
+- **Subtitle download** — optionally grabs existing subtitles from YouTube/etc. via yt-dlp (human-made preferred, `--subs` to enable), skips Whisper when available
 - **LLM translation** — any language pair via Ollama (local) or cloud LLMs (Groq, OpenAI, Claude, etc.)
 - **Vocabulary analysis** — CEFR difficulty estimation (A1–C2), rare word extraction with context and translations
 - **Dual playback** — original + translation subtitles in mpv, or browser-based web player (`pgw serve`)
@@ -89,8 +89,8 @@ pgw run "https://example.com/video" --translate en --no-play
 # Cloud API transcription + translation (no local GPU needed)
 pgw run "https://example.com/video" --backend api --llm-backend api --translate en --no-play
 
-# Skip downloading existing subtitles (always use Whisper)
-pgw run "https://example.com/video" --no-subs --translate en --no-play
+# Reuse existing subtitles from video page (skip Whisper if available)
+pgw run "https://example.com/video" --subs --translate en --no-play
 
 # Batch processing
 pgw run *.mp4 --translate en --no-play

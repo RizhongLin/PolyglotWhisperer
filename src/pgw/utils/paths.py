@@ -7,6 +7,27 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
+# ── Project metadata ──
+GITHUB_URL = "https://github.com/RizhongLin/PolyglotWhisperer"
+
+# ── Workspace file names ──
+# Fixed filenames
+METADATA_FILE = "metadata.json"
+AUDIO_FILE = "audio.wav"
+
+# Stem prefixes used to build filenames like transcription.fr.vtt
+STEM_BILINGUAL = "bilingual"
+STEM_TRANSCRIPTION = "transcription"
+STEM_TRANSLATION = "translation"
+STEM_VOCABULARY = "vocabulary"
+STEM_PARALLEL = "parallel"
+
+# Glob patterns for discovering workspace files
+GLOB_BILINGUAL_VTT = f"{STEM_BILINGUAL}.*.vtt"
+GLOB_TRANSCRIPTION_VTT = f"{STEM_TRANSCRIPTION}.*.vtt"
+GLOB_TRANSLATION_VTT = f"{STEM_TRANSLATION}.*.vtt"
+GLOB_VOCABULARY_JSON = f"{STEM_VOCABULARY}.*.json"
+
 
 def slugify(text: str) -> str:
     """Convert text to a filesystem-safe slug."""
@@ -43,8 +64,9 @@ def find_video(workspace: Path) -> Path | None:
     """
     for ext in _VIDEO_EXTENSIONS:
         candidates = sorted(workspace.glob(f"video{ext}"))
-        if candidates:
-            return candidates[0]
+        for c in candidates:
+            if c.is_file():  # Skip broken symlinks
+                return c
     return None
 
 
@@ -58,15 +80,15 @@ def workspace_paths(
     """
     paths = {
         "video": workspace / f"video{video_ext}",
-        "audio": workspace / "audio.wav",
-        "transcription_vtt": workspace / f"transcription.{language}.vtt",
-        "transcription_txt": workspace / f"transcription.{language}.txt",
-        "metadata": workspace / "metadata.json",
+        "audio": workspace / AUDIO_FILE,
+        "transcription_vtt": workspace / f"{STEM_TRANSCRIPTION}.{language}.vtt",
+        "transcription_txt": workspace / f"{STEM_TRANSCRIPTION}.{language}.txt",
+        "metadata": workspace / METADATA_FILE,
     }
     if target_lang:
-        paths["translation_vtt"] = workspace / f"translation.{target_lang}.vtt"
-        paths["translation_txt"] = workspace / f"translation.{target_lang}.txt"
-        paths["bilingual_vtt"] = workspace / f"bilingual.{language}-{target_lang}.vtt"
+        paths["translation_vtt"] = workspace / f"{STEM_TRANSLATION}.{target_lang}.vtt"
+        paths["translation_txt"] = workspace / f"{STEM_TRANSLATION}.{target_lang}.txt"
+        paths["bilingual_vtt"] = workspace / f"{STEM_BILINGUAL}.{language}-{target_lang}.vtt"
     return paths
 
 
@@ -76,12 +98,12 @@ def save_metadata(workspace: Path, **kwargs: object) -> Path:
     Creates a comprehensive metadata.json with source info, processing
     parameters, output file inventory, and timing.
     """
-    meta_path = workspace / "metadata.json"
+    meta_path = workspace / METADATA_FILE
 
     # Build file inventory from workspace contents
     files = {}
     for f in sorted(workspace.iterdir()):
-        if f.name == "metadata.json" or f.name.startswith("."):
+        if f.name == METADATA_FILE or f.name.startswith("."):
             continue
         files[f.name] = {
             "size_bytes": f.stat().st_size,

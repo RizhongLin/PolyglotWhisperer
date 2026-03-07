@@ -5,11 +5,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from rich.progress import BarColumn, Progress, TaskID, TextColumn, TimeRemainingColumn
-
 from pgw.core.models import VideoSource
 from pgw.utils.cache import file_hash
-from pgw.utils.console import cache_hit, console, warning
+from pgw.utils.console import cache_hit, stage, warning
 
 _DEFAULT_FORMAT = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
 _MANIFEST_NAME = ".downloads.jsonl"
@@ -24,16 +22,6 @@ _LANG_ALIASES: dict[str, list[str]] = {
     "no": ["nb"],
     "nb": ["no"],
 }
-
-
-def _make_progress() -> Progress:
-    return Progress(
-        TextColumn("[bold blue]{task.description}"),
-        BarColumn(),
-        TextColumn("{task.percentage:>3.0f}%"),
-        TimeRemainingColumn(),
-        console=console,
-    )
 
 
 def _load_manifest(output_dir: Path) -> list[dict]:
@@ -171,6 +159,10 @@ def _find_cached(url: str, output_dir: Path, language: str | None = None) -> Vid
             content_hash=expected_hash,
             subtitle_path=subtitle_path,
             subtitle_is_auto=subtitle_is_auto,
+            upload_date=entry.get("upload_date"),
+            uploader=entry.get("uploader"),
+            thumbnail=entry.get("thumbnail"),
+            description=entry.get("description"),
         )
     return None
 
@@ -214,27 +206,12 @@ def download(
     if cached is not None:
         return cached
 
-    progress = _make_progress()
-    task_id: TaskID | None = None
-
-    def _progress_hook(d: dict) -> None:
-        nonlocal task_id
-        if d["status"] == "downloading":
-            total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
-            downloaded = d.get("downloaded_bytes", 0)
-            if task_id is None and total > 0:
-                task_id = progress.add_task("Downloading", total=total)
-            if task_id is not None:
-                progress.update(task_id, completed=downloaded)
-        elif d["status"] == "finished":
-            if task_id is not None:
-                progress.update(task_id, completed=progress.tasks[task_id].total)
+    stage("Downloading", url)
 
     opts = {
         "format": fmt,
         "outtmpl": str(output_dir / "%(title)s_%(id)s.%(ext)s"),
-        "progress_hooks": [_progress_hook],
-        "quiet": True,
+        "quiet": False,
         "no_warnings": True,
     }
 
@@ -254,11 +231,14 @@ def download(
         )
 
     with yt_dlp.YoutubeDL(opts) as ydl:
-        with progress:
-            info = ydl.extract_info(url, download=True)
+        info = ydl.extract_info(url, download=True)
 
         title = info.get("title", "video")
         duration = info.get("duration")
+        upload_date = info.get("upload_date")  # YYYYMMDD string
+        uploader = info.get("channel") or info.get("uploader")
+        thumbnail = info.get("thumbnail")
+        description = info.get("description")
 
         # Use yt-dlp's own path resolution for exact output filename
         video_path = Path(ydl.prepare_filename(info))
@@ -288,6 +268,10 @@ def download(
             "sha256": content_sha,
             "size_bytes": video_path.stat().st_size,
             "duration": duration,
+            "upload_date": upload_date,
+            "uploader": uploader,
+            "thumbnail": thumbnail,
+            "description": description,
             "downloaded_at": datetime.now(timezone.utc).isoformat(),
         },
     )
@@ -312,4 +296,8 @@ def download(
         content_hash=content_sha,
         subtitle_path=subtitle_path,
         subtitle_is_auto=subtitle_is_auto,
+        upload_date=upload_date,
+        uploader=uploader,
+        thumbnail=thumbnail,
+        description=description,
     )

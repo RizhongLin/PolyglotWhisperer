@@ -15,19 +15,22 @@ from pgw.core.models import SubtitleSegment
 from pgw.utils.cache import cache_key, find_cached_file, get_cache_dir
 from pgw.utils.console import debug
 from pgw.utils.text import (
+    BYTES_PER_MB,
     CLAUSE_PUNCT,
+    MAX_LEAD_MERGE_COMBINED,
     MAX_MERGE_LEAD_WORDS,
     MAX_MERGE_TRAIL_WORDS,
     MAX_SEGMENT_CHARS,
     MAX_SEGMENT_DURATION,
     MERGE_CHAR_SLACK,
     MERGE_GAP_THRESHOLD,
+    MIN_WORDS_CLAUSE_SPLIT,
     SENTENCE_END_CHARS,
     SPEECH_GAP_THRESHOLD,
 )
 
 # 25 MB upload limit for Groq/OpenAI Whisper API
-_MAX_FILE_SIZE = 25 * 1024 * 1024
+_MAX_FILE_SIZE = 25 * BYTES_PER_MB
 
 
 def transcribe(
@@ -104,7 +107,7 @@ def _compress_for_api(
         if hit is not None:
             return hit
 
-    debug(f"Compressing audio: {audio_path.stat().st_size / (1024 * 1024):.1f} MB WAV → MP3")
+    debug(f"Compressing audio: {audio_path.stat().st_size / BYTES_PER_MB:.1f} MB WAV → MP3")
 
     # Determine write path
     if workspace_dir is not None:
@@ -135,7 +138,7 @@ def _compress_for_api(
         stderr_msg = result.stderr.decode(errors="replace").strip()
         raise RuntimeError(f"Audio compression failed: {stderr_msg}")
 
-    new_size_mb = mp3_path.stat().st_size / (1024 * 1024)
+    new_size_mb = mp3_path.stat().st_size / BYTES_PER_MB
     if mp3_path.stat().st_size > _MAX_FILE_SIZE:
         raise ValueError(
             f"Compressed audio is still {new_size_mb:.1f} MB, exceeding the 25 MB API limit. "
@@ -248,7 +251,11 @@ def regroup_words(
         current = [group[0]]
         for w in group[1:]:
             prev_text = current[-1]["text"]
-            if len(current) >= 4 and prev_text and prev_text[-1] in CLAUSE_PUNCT:
+            if (
+                len(current) >= MIN_WORDS_CLAUSE_SPLIT
+                and prev_text
+                and prev_text[-1] in CLAUSE_PUNCT
+            ):
                 split.append(current)
                 current = [w]
             else:
@@ -307,7 +314,7 @@ def regroup_words(
         if (
             len(prev) <= MAX_MERGE_LEAD_WORDS
             and gap < MERGE_GAP_THRESHOLD
-            and len(prev) + len(group) <= 10
+            and len(prev) + len(group) <= MAX_LEAD_MERGE_COMBINED
             and len(combined_text) <= merge_limit
         ):
             merged[-1].extend(group)

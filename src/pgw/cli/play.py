@@ -9,7 +9,7 @@ import typer
 
 from pgw.core.config import load_config
 from pgw.utils.console import error
-from pgw.utils.paths import find_video
+from pgw.utils.paths import GLOB_BILINGUAL_VTT, GLOB_TRANSCRIPTION_VTT, find_video
 
 
 def play(
@@ -45,13 +45,13 @@ def play(
 
         # Auto-detect bilingual VTT
         if bilingual is None:
-            candidates = sorted(workspace.glob("bilingual.*.vtt"))
+            candidates = sorted(workspace.glob(GLOB_BILINGUAL_VTT))
             if candidates:
                 bilingual = candidates[0]
 
         # Auto-detect primary subs
         if subs is None:
-            candidates = sorted(workspace.glob("transcription.*.vtt"))
+            candidates = sorted(workspace.glob(GLOB_TRANSCRIPTION_VTT))
             if candidates:
                 subs = candidates[0]
     else:

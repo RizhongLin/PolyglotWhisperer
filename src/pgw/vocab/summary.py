@@ -13,7 +13,7 @@ from pgw.core.models import SubtitleSegment
 from pgw.utils.spacy import load_spacy_model
 
 # POS tags to skip during vocabulary extraction
-_SKIP_POS = {"PUNCT", "SPACE", "NUM", "SYM", "X"}
+_SKIP_POS = {"PUNCT", "SPACE", "NUM", "SYM", "X", "PROPN"}
 
 # CEFR bins based on wordfreq zipf_frequency values.
 # zipf ≈ log10(frequency_per_billion). Higher = more common.
@@ -26,6 +26,25 @@ _CEFR_BINS = [
 ]
 
 _CEFR_ORDER = {"A1": 1, "A2": 2, "B1": 3, "B2": 4, "C1": 5, "C2": 6}
+
+# Characters that indicate abbreviations or artifacts, not learnable vocabulary
+_ARTIFACT_CHARS = frozenset(".-/\\@#")
+
+
+def _is_learnable(token) -> bool:
+    """Return True if the token is learnable vocabulary (not an artifact)."""
+    if token.pos_ in _SKIP_POS or token.is_space:
+        return False
+    text = token.text.strip()
+    if not text or len(text) <= 1:
+        return False
+    # Skip all-caps abbreviations (JU, USA, etc.)
+    if text.isupper() and len(text) <= 5:
+        return False
+    # Skip tokens containing punctuation artifacts (S.Garcia, -, etc.)
+    if any(c in _ARTIFACT_CHARS for c in text):
+        return False
+    return True
 
 
 def zipf_to_cefr(zipf: float) -> str:
@@ -86,7 +105,7 @@ def generate_vocab_summary(
 
     for doc_idx, doc in enumerate(nlp.pipe(texts, batch_size=50)):
         for token in doc:
-            if token.pos_ in _SKIP_POS or token.is_space:
+            if not _is_learnable(token):
                 continue
 
             total_words += 1
@@ -120,11 +139,14 @@ def generate_vocab_summary(
                 translation=translation,
             )
 
-    # Compute estimated video level (weighted average CEFR)
+    # Compute estimated video level — weighted by occurrence count so that
+    # common A1/A2 words (appearing 10+ times) outweigh rare C2 hapax legomena.
     if lemma_key_to_info:
-        total_level = sum(_CEFR_ORDER[info.cefr] for info in lemma_key_to_info.values())
-        avg_level = total_level / len(lemma_key_to_info)
-        # Round to nearest CEFR
+        total_weight = sum(info.count for info in lemma_key_to_info.values())
+        weighted_sum = sum(
+            _CEFR_ORDER[info.cefr] * info.count for info in lemma_key_to_info.values()
+        )
+        avg_level = weighted_sum / total_weight
         level_names = list(_CEFR_ORDER.keys())
         level_idx = min(max(round(avg_level) - 1, 0), len(level_names) - 1)
         estimated_level = level_names[level_idx]

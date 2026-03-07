@@ -9,6 +9,7 @@ import typer
 
 from pgw.core.config import load_config
 from pgw.utils.console import console
+from pgw.utils.text import BYTES_PER_GB, BYTES_PER_KB, BYTES_PER_MB
 
 _CACHE_CATEGORIES = ["audio", "compressed", "downloads", "transcriptions"]
 
@@ -30,13 +31,13 @@ def _dir_size(path: Path) -> tuple[int, int]:
 
 def _format_size(size_bytes: int) -> str:
     """Format bytes as human-readable size."""
-    if size_bytes < 1024:
+    if size_bytes < BYTES_PER_KB:
         return f"{size_bytes} B"
-    if size_bytes < 1024 * 1024:
-        return f"{size_bytes / 1024:.0f} KB"
-    if size_bytes < 1024 * 1024 * 1024:
-        return f"{size_bytes / (1024 * 1024):.1f} MB"
-    return f"{size_bytes / (1024 * 1024 * 1024):.2f} GB"
+    if size_bytes < BYTES_PER_MB:
+        return f"{size_bytes / BYTES_PER_KB:.0f} KB"
+    if size_bytes < BYTES_PER_GB:
+        return f"{size_bytes / BYTES_PER_MB:.1f} MB"
+    return f"{size_bytes / BYTES_PER_GB:.2f} GB"
 
 
 def clean(

@@ -1,8 +1,16 @@
 """Shared text processing constants.
 
-Centralised definitions for punctuation sets, apostrophes, and timing
-thresholds used across the transcriber and LLM modules.
+Centralised definitions for punctuation sets, apostrophes, timing
+thresholds, and formatting constants used across multiple modules.
 """
+
+# --- Unit conversion ---
+
+SECONDS_PER_MINUTE = 60
+SECONDS_PER_HOUR = 3600
+BYTES_PER_KB = 1024
+BYTES_PER_MB = 1024 * 1024
+BYTES_PER_GB = 1024 * 1024 * 1024
 
 # --- Punctuation sets ---
 
@@ -44,3 +52,12 @@ MAX_MERGE_TRAIL_WORDS = 4
 
 # Maximum words in a leading fragment eligible for merge-forward
 MAX_MERGE_LEAD_WORDS = 2
+
+# Maximum combined words when merging a leading fragment into the next group
+MAX_LEAD_MERGE_COMBINED = 10
+
+# Minimum words in a segment before splitting at clause punctuation
+MIN_WORDS_CLAUSE_SPLIT = 4
+
+# Maximum words in a gap-based merge (merge_by_gap)
+MAX_WORDS_GAP_MERGE = 3

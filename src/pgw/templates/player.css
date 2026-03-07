@@ -63,6 +63,86 @@ video {
   box-shadow: 0 6px 28px rgba(0,0,0,0.3);
   margin-bottom: 0;
 }
+/* ── Video missing state ── */
+.video-missing {
+  position: relative;
+  width: 100%; border-radius: 0.5rem;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: #111;
+}
+.vm-backdrop {
+  position: absolute; inset: 0;
+}
+.vm-backdrop img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  filter: blur(20px) brightness(0.35);
+  transform: scale(1.1);  /* hide blur edge artifacts */
+}
+.vm-content {
+  position: relative; z-index: 1;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  height: 100%; padding: 2rem 1rem;
+  text-align: center; color: rgba(255,255,255,0.85);
+}
+.vm-content > svg {
+  width: 2.5rem; height: 2.5rem;
+  margin-bottom: 0.75rem; opacity: 0.5;
+  color: rgba(255,255,255,0.6);
+}
+.vm-content p {
+  margin: 0.2rem 0; font-size: 0.82rem;
+  color: rgba(255,255,255,0.55);
+}
+.vm-content p strong {
+  font-size: 0.95rem;
+  color: rgba(255,255,255,0.85);
+}
+.redownload-btn {
+  margin-top: 1rem; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  font-size: 0.82rem; padding: 0.45rem 1.2rem;
+  border-radius: 2rem;
+  color: rgba(255,255,255,0.85) !important;
+  border-color: rgba(255,255,255,0.3) !important;
+  background: rgba(255,255,255,0.08);
+  transition: all 0.18s ease;
+}
+.redownload-btn:hover {
+  background: rgba(255,255,255,0.15);
+  border-color: rgba(255,255,255,0.5) !important;
+  color: #fff !important;
+}
+.redownload-btn svg { width: 0.9rem; height: 0.9rem; }
+.redownload-btn:disabled { opacity: 0.6; cursor: wait; }
+.redownload-btn:disabled svg { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.vm-progress {
+  display: flex; flex-direction: column;
+  align-items: center; gap: 0.3rem;
+}
+.vm-ring {
+  position: relative;
+  width: 4.5rem; height: 4.5rem;
+  margin-bottom: 0.75rem;
+}
+.vm-ring svg { width: 100%; height: 100%; }
+.vm-ring-fill {
+  transition: stroke-dasharray 0.4s ease;
+}
+.vm-pct {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.85rem; font-weight: 700;
+  color: rgba(255,255,255,0.85);
+  font-variant-numeric: tabular-nums;
+}
+.vm-detail {
+  font-size: 0.75rem !important;
+  font-variant-numeric: tabular-nums;
+}
 video::cue {
   font-size: 1.1rem; background: rgba(0,0,0,0.7);
 }
