@@ -8,7 +8,7 @@ from pathlib import Path
 
 from pgw.core.config import PGWConfig
 from pgw.core.events import EventCallback, PipelineEvent
-from pgw.downloader.resolver import is_url, resolve
+from pgw.downloader.resolver import resolve
 from pgw.utils.audio import extract_audio_cached
 from pgw.utils.cache import (
     atomic_write_text,
@@ -65,8 +65,6 @@ def run_pipeline(
 
     # Step 1: Resolve input (always goes through resolve() for content_hash)
     emit("download", 0.0, f"Resolving input: {input_path}")
-    if is_url(input_path):
-        stage("Downloading", input_path)
     sub_language = language if config.download.subtitles else None
     source = resolve(
         input_path,

@@ -162,7 +162,6 @@ def _transcribe_single(
     # Resolve input: URL → download, local path → use directly
     source = None
     if is_url(input_path):
-        stage("Downloading", input_path)
         sub_language = language if config.download.subtitles else None
         source = resolve(
             input_path,
