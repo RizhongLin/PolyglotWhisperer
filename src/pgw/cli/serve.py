@@ -330,6 +330,7 @@ def _build_html(
     video_path: Path | None,
     url_prefix: str = "",
     sibling_paths: list[Path] | None = None,
+    library_url: str = "",
 ) -> str:
     """Generate the player HTML for a workspace."""
     tracks = _discover_tracks(workspace, sibling_paths)
@@ -386,9 +387,21 @@ def _build_html(
             f"</div>"
         )
 
+    icon_src = f"{url_prefix}/icon.png"
+    if library_url:
+        brand = (
+            f'<p><a href="{html.escape(library_url)}" class="brand-link">'
+            f'<i data-lucide="arrow-left" class="brand-back"></i>'
+            f'<img src="{icon_src}" class="brand-logo" alt="">'
+            f"PolyglotWhisperer</a></p>"
+        )
+    else:
+        brand = f'<p><img src="{icon_src}" class="brand-logo" alt="">' f"PolyglotWhisperer</p>"
+
     return _PLAYER_TEMPLATE.format(
         title=html.escape(title),
         base_url=url_prefix,
+        brand=brand,
         video_section=video_section,
         metadata_rows=_build_metadata_rows(meta),
         download_rows=_build_download_rows(workspace, meta, url_prefix, sibling_paths),
@@ -1177,6 +1190,7 @@ class _LibraryHandler(http.server.BaseHTTPRequestHandler):
                 video_path,
                 url_prefix=f"/ws/{slug}/{timestamp}",
                 sibling_paths=siblings,
+                library_url="/",
             )
             self._serve_html(player_html)
         elif file_part == "player.css":

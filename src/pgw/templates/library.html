@@ -62,6 +62,14 @@
     if (!localStorage.getItem('pgw-theme')) applyTheme(getEffective());
   }});
 
+  // Sticky header scroll effect
+  const hdr = document.querySelector('header');
+  if (hdr) {{
+    window.addEventListener('scroll', () => {{
+      hdr.classList.toggle('scrolled', window.scrollY > 8);
+    }}, {{ passive: true }});
+  }}
+
   lucide.createIcons();
 </script>
 </body>

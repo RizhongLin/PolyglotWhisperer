@@ -1,8 +1,12 @@
 /* Tighten Pico defaults & smooth theme transitions */
+html { scrollbar-gutter: stable; }
 body {
   --pico-block-spacing-vertical: 1rem;
   --pico-block-spacing-horizontal: 1rem;
   padding: 0 1rem;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 body, body * {
   transition: background-color 0.25s ease, color 0.25s ease,
@@ -12,12 +16,22 @@ body, body * {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
 }
-header { padding: 1rem 0 0.75rem; }
-main { padding-top: 0; animation: fadeIn 0.4s ease; }
+main { padding-top: 0; animation: fadeIn 0.4s ease; flex: 1; }
 
-/* ── Header ── */
+/* ── Header (sticky) ── */
 header {
+  position: sticky; top: 0; z-index: 100;
   display: flex; align-items: center; gap: 1rem;
+  padding: 0.75rem 1rem;
+  margin: 0 -1rem;  /* bleed into body padding */
+  background: color-mix(in srgb, var(--pico-background-color) 85%, transparent);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.25s ease, box-shadow 0.25s ease;
+}
+header.scrolled {
+  border-bottom-color: var(--pico-muted-border-color);
+  box-shadow: 0 1px 8px rgba(0,0,0,0.06);
 }
 header hgroup {
   flex: 1; margin-bottom: 0;
@@ -38,6 +52,20 @@ header hgroup p {
   vertical-align: middle;
   margin-top: -0.1rem;
 }
+.brand-link {
+  text-decoration: none; color: inherit;
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  transition: color 0.18s ease;
+}
+.brand-link:hover { color: var(--pico-primary); text-decoration: none; }
+.brand-back {
+  width: 0.85rem; height: 0.85rem;
+  opacity: 0.5;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.brand-link:hover .brand-back {
+  opacity: 1; transform: translateX(-2px);
+}
 #theme-toggle {
   width: 2.2rem; height: 2.2rem;
   padding: 0; line-height: 1; min-width: auto;
@@ -45,6 +73,7 @@ header hgroup p {
   display: inline-flex; align-items: center; justify-content: center;
   border-color: var(--pico-muted-border-color);
   color: var(--pico-color);
+  flex-shrink: 0;
 }
 #theme-toggle:hover {
   border-color: var(--pico-primary);
@@ -409,7 +438,7 @@ video::cue {
 /* ── Footer ── */
 footer {
   padding: 1.25rem 0 1rem; font-size: 0.78rem;
-  text-align: center; margin-top: 1.5rem;
+  text-align: center; margin-top: 2rem;
   color: var(--pico-muted-color);
 }
 footer p { margin-bottom: 0.35rem; }

@@ -25,6 +25,14 @@ prefersDark.addEventListener('change', () => {
   if (!localStorage.getItem('pgw-theme')) applyTheme(getEffective());
 });
 
+// --- Sticky header scroll effect ---
+const header = document.querySelector('header');
+if (header) {
+  window.addEventListener('scroll', () => {
+    header.classList.toggle('scrolled', window.scrollY > 8);
+  }, { passive: true });
+}
+
 // --- Helpers ---
 const video = document.getElementById('player');
 const tracks = video ? video.textTracks : [];
