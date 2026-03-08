@@ -17,6 +17,7 @@ from typing import Annotated, Optional
 
 import typer
 
+from pgw.core.languages import language_name
 from pgw.utils.console import console, error
 from pgw.utils.paths import (
     AUDIO_FILE,
@@ -28,6 +29,20 @@ from pgw.utils.paths import (
     find_video,
 )
 from pgw.utils.text import BYTES_PER_KB, BYTES_PER_MB, SECONDS_PER_HOUR
+
+
+def _lang_short(code: str) -> str:
+    """Format a language code as uppercase abbreviation (e.g. 'FR')."""
+    return code.upper()
+
+
+def _lang_full(code: str) -> str:
+    """Format a language code as full name with code (e.g. 'French (fr)')."""
+    name = language_name(code).title()
+    if name.lower() == code.lower():
+        return name  # unknown code, don't repeat
+    return f"{name} ({code})"
+
 
 # ── Constants ──
 _DESC_MAX_CHARS = 200  # Truncation limit for descriptions in metadata card
@@ -153,9 +168,9 @@ def _build_metadata_rows(meta: dict) -> str:
     lang = meta.get("language", "")
     target = meta.get("target_language", "")
     if lang and target:
-        add("languages", "Languages", f"{lang.upper()} &rarr; {target.upper()}")
+        add("languages", "Languages", f"{_lang_full(lang)} &rarr; {_lang_full(target)}")
     elif lang:
-        add("languages", "Language", lang.upper())
+        add("languages", "Language", _lang_full(lang))
 
     uploader = meta.get("uploader", "")
     if uploader:
@@ -224,7 +239,11 @@ def _friendly_name(filename: str) -> str:
     parts = stem.split(".")
     base = parts[0] if parts else stem
     langs = parts[1] if len(parts) > 1 else ""
-    lang_display = langs.upper().replace("-", " \u2192 ") if langs else ""
+    if langs:
+        lang_codes = langs.split("-")
+        lang_display = " \u2192 ".join(language_name(c).title() for c in lang_codes)
+    else:
+        lang_display = ""
 
     names = {
         "bilingual": "Bilingual Subtitles",
@@ -569,9 +588,9 @@ def _build_library_html(workspaces: list[dict]) -> str:
                 lang_labels = []
                 for lang, target in lang_pairs:
                     if lang and target:
-                        lang_labels.append(f"{lang.upper()} &rarr; {target.upper()}")
+                        lang_labels.append(f"{_lang_short(lang)} &rarr; {_lang_short(target)}")
                     elif lang:
-                        lang_labels.append(lang.upper())
+                        lang_labels.append(_lang_short(lang))
                 if lang_labels:
                     joined = " · ".join(lang_labels)
                     meta_chips.append(f'<span><i data-lucide="languages"></i>{joined}</span>')

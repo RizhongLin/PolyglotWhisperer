@@ -50,7 +50,7 @@ class LLMConfig(BackendConfig):
     api_base: str = "http://localhost:11434"
     temperature: float = 0.3
     max_tokens: int = 16384
-    timeout: int = 300
+    timeout: int = 600
     num_retries: int = 2
     refine_enabled: bool = False
     translation_enabled: bool = True
