@@ -21,7 +21,7 @@ from pgw.llm.prompts import (
     reconstruct_with_empties,
 )
 from pgw.utils.console import chunk_progress, warning
-from pgw.utils.text import SENTENCE_END_CHARS, TIMING_GAP_THRESHOLD
+from pgw.utils.text import SENTENCE_END_CHARS, TIMING_GAP_THRESHOLD, find_sentence_split
 
 CHUNK_SIZE = 30
 OVERLAP = 4  # Forward lookahead — refined but discarded, for boundary context
@@ -95,11 +95,23 @@ def _process_chunk(
         if exact_match2:
             return refined_texts2
 
-    # Binary split
+    # Binary split with sentence-boundary-aware split point
     warning(f"Splitting into smaller batches ({len(texts)} segments)...")
-    mid = len(texts) // 2
+    mid = find_sentence_split(texts)
     first_half = _process_chunk(texts[:mid], language, config, context, _depth=_depth + 1)
-    second_half = _process_chunk(texts[mid:], language, config, "", _depth=_depth + 1)
+
+    # Build context for second half from first half's results
+    second_context_parts = [context] if context else []
+    preceding_lines = [f"[preceding] {line}" for line in first_half[-HISTORY_SIZE:]]
+    if preceding_lines:
+        second_context_parts.append(
+            "Previously refined (for reference only):\n" + "\n".join(preceding_lines)
+        )
+    second_context = "\n".join(p for p in second_context_parts if p)
+    if second_context and not second_context.endswith("\n"):
+        second_context += "\n"
+
+    second_half = _process_chunk(texts[mid:], language, config, second_context, _depth=_depth + 1)
     return first_half + second_half
 
 

@@ -22,7 +22,7 @@ from pgw.llm.prompts import (
     reconstruct_with_empties,
 )
 from pgw.utils.console import chunk_progress, debug, warning
-from pgw.utils.text import SENTENCE_END_CHARS, TIMING_GAP_THRESHOLD
+from pgw.utils.text import SENTENCE_END_CHARS, TIMING_GAP_THRESHOLD, find_sentence_split
 
 CHUNK_SIZE = 48
 OVERLAP = 6  # Forward lookahead — segments translated but discarded, for boundary context
@@ -144,9 +144,9 @@ def process_chunk(
             return translated_texts2
         # Fall through to split
 
-    # --- Issue 4: Binary split with fresh context for second half ---
+    # --- Issue 4: Binary split with sentence-boundary-aware split point ---
     warning(f"Splitting into smaller batches ({len(texts)} segments)...")
-    mid = len(texts) // 2
+    mid = find_sentence_split(texts)
     first_half = process_chunk(
         texts[:mid],
         source_lang,
