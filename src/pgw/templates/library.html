@@ -1,76 +1,82 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="color-scheme" content="light dark">
-<title>Library — PolyglotWhisperer</title>
-<link rel="stylesheet"
-  href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.classless.min.css">
-<link rel="icon" type="image/png" href="/icon.png">
-<link rel="stylesheet" href="/library.css">
-</head>
-<body>
-<header>
-  <hgroup>
-    <h1>Library</h1>
-    <p><img src="/icon.png" class="brand-logo" alt="">PolyglotWhisperer</p>
-  </hgroup>
-  <button id="theme-toggle" class="outline secondary"
-    aria-label="Toggle theme"></button>
-</header>
-<main>
-  {content}
-</main>
-<footer>
-  <p><img src="/logo.png" class="footer-logo" alt="PolyglotWhisperer"></p>
-  <p>
-    <span class="footer-brand">PolyglotWhisperer</span>
-    <span class="footer-sep">&middot;</span>
-    <em>Video transcription &amp; translation for language learners</em>
-  </p>
-  <p>
-    <a class="footer-gh" href="{github_url}" target="_blank"
-      rel="noopener"><i data-lucide="github"></i> GitHub</a>
-  </p>
-</footer>
-<script src="https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.min.js"></script>
-<script>
-  const root = document.documentElement;
-  const toggle = document.getElementById('theme-toggle');
-  const LIGHT = 'light', DARK = 'dark';
-  const prefersDark = matchMedia('(prefers-color-scheme: dark)');
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Library — PolyglotWhisperer</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.classless.min.css"
+    />
+    <link rel="icon" type="image/png" href="/icon.png" />
+    <link rel="stylesheet" href="/library.css" />
+  </head>
+  <body>
+    <header>
+      <hgroup>
+        <h1>Library</h1>
+        <p>
+          <img src="/icon.png" class="brand-logo" alt="" />PolyglotWhisperer
+        </p>
+      </hgroup>
+      <button
+        id="theme-toggle"
+        class="outline secondary"
+        aria-label="Toggle theme"
+      ></button>
+    </header>
+    <main>{content}</main>
+    <footer>
+      <p><img src="/logo.png" class="footer-logo" alt="PolyglotWhisperer" /></p>
+      <p>
+        <span class="footer-brand">PolyglotWhisperer</span>
+        <span class="footer-sep">&middot;</span>
+        <em>Video transcription &amp; translation for language learners</em>
+      </p>
+      <p>
+        <a class="footer-gh" href="{github_url}" target="_blank" rel="noopener"
+          ><i data-lucide="github"></i> GitHub</a
+        >
+      </p>
+    </footer>
+    <script src="https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.min.js"></script>
+    <script>
+      const root = document.documentElement;
+      const toggle = document.getElementById('theme-toggle');
+      const LIGHT = 'light', DARK = 'dark';
+      const prefersDark = matchMedia('(prefers-color-scheme: dark)');
 
-  function getEffective() {{
-    const saved = localStorage.getItem('pgw-theme');
-    if (saved) return saved;
-    return prefersDark.matches ? DARK : LIGHT;
-  }}
-  function applyTheme(theme) {{
-    root.dataset.theme = theme;
-    const icon = theme === DARK ? 'sun' : 'moon';
-    toggle.innerHTML = `<i data-lucide="${{icon}}"></i>`;
-    lucide.createIcons({{ nodes: [toggle] }});
-  }}
-  applyTheme(getEffective());
-  toggle.addEventListener('click', () => {{
-    const next = root.dataset.theme === DARK ? LIGHT : DARK;
-    localStorage.setItem('pgw-theme', next);
-    applyTheme(next);
-  }});
-  prefersDark.addEventListener('change', () => {{
-    if (!localStorage.getItem('pgw-theme')) applyTheme(getEffective());
-  }});
+      function getEffective() {{
+        const saved = localStorage.getItem('pgw-theme');
+        if (saved) return saved;
+        return prefersDark.matches ? DARK : LIGHT;
+      }}
+      function applyTheme(theme) {{
+        root.dataset.theme = theme;
+        const icon = theme === DARK ? 'sun' : 'moon';
+        toggle.innerHTML = `<i data-lucide="${{icon}}"></i>`;
+        lucide.createIcons({{ nodes: [toggle] }});
+      }}
+      applyTheme(getEffective());
+      toggle.addEventListener('click', () => {{
+        const next = root.dataset.theme === DARK ? LIGHT : DARK;
+        localStorage.setItem('pgw-theme', next);
+        applyTheme(next);
+      }});
+      prefersDark.addEventListener('change', () => {{
+        if (!localStorage.getItem('pgw-theme')) applyTheme(getEffective());
+      }});
 
-  // Sticky header scroll effect
-  const hdr = document.querySelector('header');
-  if (hdr) {{
-    window.addEventListener('scroll', () => {{
-      hdr.classList.toggle('scrolled', window.scrollY > 8);
-    }}, {{ passive: true }});
-  }}
+      // Sticky header scroll effect
+      const hdr = document.querySelector('header');
+      if (hdr) {{
+        window.addEventListener('scroll', () => {{
+          hdr.classList.toggle('scrolled', window.scrollY > 8);
+        }}, {{ passive: true }});
+      }}
 
-  lucide.createIcons();
-</script>
-</body>
+      lucide.createIcons();
+    </script>
+  </body>
 </html>

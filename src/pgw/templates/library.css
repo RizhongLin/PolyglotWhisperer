@@ -1,5 +1,7 @@
 /* Tighten Pico defaults & smooth theme transitions */
-html { scrollbar-gutter: stable; }
+html {
+  scrollbar-gutter: stable;
+}
 body {
   --pico-block-spacing-vertical: 1rem;
   --pico-block-spacing-horizontal: 1rem;
@@ -8,55 +10,87 @@ body {
   display: flex;
   flex-direction: column;
 }
-body, body * {
-  transition: background-color 0.25s ease, color 0.25s ease,
-              border-color 0.25s ease, box-shadow 0.25s ease;
+body,
+body * {
+  transition:
+    background-color 0.25s ease,
+    color 0.25s ease,
+    border-color 0.25s ease,
+    box-shadow 0.25s ease;
 }
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
-main { padding-top: 0; animation: fadeIn 0.4s ease; flex: 1; }
+main {
+  padding-top: 0;
+  animation: fadeIn 0.4s ease;
+  flex: 1;
+}
 
 /* ── Header (sticky) ── */
 header {
-  position: sticky; top: 0; z-index: 100;
-  display: flex; align-items: center; gap: 1rem;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
   padding: 0.75rem 1rem;
   margin: 0 -1rem;
   background: color-mix(in srgb, var(--pico-background-color) 85%, transparent);
-  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border-bottom: 1px solid transparent;
-  transition: border-color 0.25s ease, box-shadow 0.25s ease;
+  transition:
+    border-color 0.25s ease,
+    box-shadow 0.25s ease;
 }
 header.scrolled {
   border-bottom-color: var(--pico-muted-border-color);
-  box-shadow: 0 1px 8px rgba(0,0,0,0.06);
+  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.06);
 }
 header hgroup {
-  flex: 1; margin-bottom: 0;
+  flex: 1;
+  margin-bottom: 0;
 }
 header hgroup h1 {
-  margin-bottom: 0.1rem; font-size: 1.5rem;
+  margin-bottom: 0.1rem;
+  font-size: 1.5rem;
 }
 header hgroup p {
-  margin-bottom: 0; font-size: 0.8rem;
+  margin-bottom: 0;
+  font-size: 0.8rem;
   color: var(--pico-muted-color);
   letter-spacing: 0.08em;
   font-variant: small-caps;
-  display: flex; align-items: center; gap: 0.35rem;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
 }
 .brand-logo {
-  width: 1.4rem; height: 1.4rem;
+  width: 1.4rem;
+  height: 1.4rem;
   object-fit: contain;
   vertical-align: middle;
   margin-top: -0.1rem;
 }
 #theme-toggle {
-  width: 2.2rem; height: 2.2rem;
-  padding: 0; line-height: 1; min-width: auto;
+  width: 2.2rem;
+  height: 2.2rem;
+  padding: 0;
+  line-height: 1;
+  min-width: auto;
   border-radius: 50%;
-  display: inline-flex; align-items: center; justify-content: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border-color: var(--pico-muted-border-color);
   color: var(--pico-color);
   flex-shrink: 0;
@@ -67,10 +101,13 @@ header hgroup p {
   background: color-mix(in srgb, var(--pico-primary) 10%, transparent);
 }
 #theme-toggle svg {
-  width: 1.15rem; height: 1.15rem;
+  width: 1.15rem;
+  height: 1.15rem;
   transition: transform 0.35s ease;
 }
-#theme-toggle:hover svg { transform: rotate(25deg); }
+#theme-toggle:hover svg {
+  transform: rotate(25deg);
+}
 
 /* ── Workspace grid ── */
 .ws-grid {
@@ -80,17 +117,21 @@ header hgroup p {
   margin-top: 0.5rem;
 }
 .ws-card {
-  text-decoration: none; color: inherit;
+  text-decoration: none;
+  color: inherit;
   display: block;
 }
 .ws-card article {
-  margin: 0; padding: 0;
+  margin: 0;
+  padding: 0;
   background: var(--pico-card-background-color);
   border: 1px solid var(--pico-muted-border-color);
   border-radius: 0.5rem;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
-  transition: border-color 0.18s ease, box-shadow 0.18s ease,
-              transform 0.18s ease;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
   height: 100%;
   overflow: hidden;
   display: flex;
@@ -98,7 +139,7 @@ header hgroup p {
 }
 .ws-card:hover article {
   border-color: var(--pico-primary);
-  box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
   transform: translateY(-2px);
 }
 
@@ -107,11 +148,16 @@ header hgroup p {
   width: 100%;
   aspect-ratio: 16 / 9;
   overflow: hidden;
-  background: color-mix(in srgb, var(--pico-muted-border-color) 30%, transparent);
+  background: color-mix(
+    in srgb,
+    var(--pico-muted-border-color) 30%,
+    transparent
+  );
   flex-shrink: 0;
 }
 .ws-thumb img {
-  width: 100%; height: 100%;
+  width: 100%;
+  height: 100%;
   object-fit: cover;
   display: block;
   transition: transform 0.3s ease;
@@ -120,12 +166,15 @@ header hgroup p {
   transform: scale(1.04);
 }
 .ws-thumb-placeholder {
-  display: flex; align-items: center; justify-content: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   color: var(--pico-muted-color);
   opacity: 0.4;
 }
 .ws-thumb-placeholder svg {
-  width: 2.5rem; height: 2.5rem;
+  width: 2.5rem;
+  height: 2.5rem;
 }
 
 /* ── Card body ── */
@@ -136,40 +185,73 @@ header hgroup p {
   flex-direction: column;
 }
 .ws-card h3 {
-  margin: 0 0 0.4rem; font-size: 0.92rem; line-height: 1.3;
-  overflow: hidden; text-overflow: ellipsis;
-  display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2;
+  margin: 0 0 0.4rem;
+  font-size: 0.92rem;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   -webkit-box-orient: vertical;
 }
 .ws-meta {
-  display: flex; flex-wrap: wrap; gap: 0.4rem;
-  margin: auto 0 0; font-size: 0.72rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: auto 0 0;
+  font-size: 0.72rem;
 }
 .ws-meta span {
-  display: inline-flex; align-items: center; gap: 0.2rem;
-  padding: 0.1rem 0.45rem; border-radius: 2rem;
-  background: color-mix(in srgb, var(--pico-muted-border-color) 40%, transparent);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 2rem;
+  background: color-mix(
+    in srgb,
+    var(--pico-muted-border-color) 40%,
+    transparent
+  );
   color: var(--pico-muted-color);
   white-space: nowrap;
 }
-.ws-meta svg { width: 0.65rem; height: 0.65rem; }
+.ws-meta svg {
+  width: 0.65rem;
+  height: 0.65rem;
+}
 
 /* ── Empty state ── */
 .ws-empty {
-  text-align: center; padding: 3rem 1rem;
+  text-align: center;
+  padding: 3rem 1rem;
   color: var(--pico-muted-color);
 }
-.ws-empty svg { width: 3rem; height: 3rem; margin-bottom: 1rem; opacity: 0.4; }
-.ws-empty p { font-size: 0.85rem; margin: 0.3rem 0; }
+.ws-empty svg {
+  width: 3rem;
+  height: 3rem;
+  margin-bottom: 1rem;
+  opacity: 0.4;
+}
+.ws-empty p {
+  font-size: 0.85rem;
+  margin: 0.3rem 0;
+}
 
 /* ── Footer (sticky bottom) ── */
 footer {
-  padding: 1.25rem 0 1rem; font-size: 0.78rem;
-  text-align: center; margin-top: 2rem;
+  padding: 1.25rem 0 1rem;
+  font-size: 0.78rem;
+  text-align: center;
+  margin-top: 2rem;
   color: var(--pico-muted-color);
 }
-footer p { margin-bottom: 0.35rem; }
-footer p:last-child { margin-bottom: 0; }
+footer p {
+  margin-bottom: 0.35rem;
+}
+footer p:last-child {
+  margin-bottom: 0;
+}
 .footer-logo {
   height: 3.5rem;
   object-fit: contain;
@@ -188,12 +270,16 @@ footer em {
   font-weight: 400;
 }
 .footer-gh {
-  display: inline-flex; align-items: center; gap: 0.25rem;
-  font-size: 0.72rem; font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.72rem;
+  font-weight: 500;
   padding: 0.15rem 0.55rem 0.15rem 0.4rem;
   border-radius: 2rem;
   border: 1px solid var(--pico-muted-border-color);
-  text-decoration: none; color: inherit;
+  text-decoration: none;
+  color: inherit;
   transition: all 0.18s ease;
 }
 .footer-gh:hover {
@@ -201,4 +287,7 @@ footer em {
   color: var(--pico-primary);
   text-decoration: none;
 }
-.footer-gh svg { width: 0.75rem; height: 0.75rem; }
+.footer-gh svg {
+  width: 0.75rem;
+  height: 0.75rem;
+}

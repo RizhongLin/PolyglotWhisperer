@@ -17,8 +17,8 @@ class TestBuildParallelHtml:
         assert "<!DOCTYPE html>" in result
         assert "<table>" in result
         assert "</table>" in result
-        assert "FR" in result
-        assert "EN" in result
+        assert "French" in result
+        assert "English" in result
 
     def test_title_escaped(self):
         orig = make_segments(["Bonjour"])

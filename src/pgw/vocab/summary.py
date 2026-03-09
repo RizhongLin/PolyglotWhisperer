@@ -33,9 +33,12 @@ _ARTIFACT_CHARS = frozenset(".-/\\@#")
 # Words with zipf=0 are likely ASR errors or unknown tokens, not real vocabulary
 _MIN_ZIPF = 0.5
 
-# Percentile of hardest vocabulary used for difficulty estimation.
-# A text's difficulty comes from its hard words, not that it also uses "the" and "is".
-_DIFFICULTY_PERCENTILE = 0.10  # top 10% hardest known words
+# Comprehension threshold: a learner needs to know this fraction of word
+# tokens to comfortably understand a text.  Applied linguistics research
+# (Laufer & Ravenhorst-Kalovski 2010) suggests 95% for adequate and 98%
+# for optimal comprehension.  We use 95% for spoken media where context,
+# visuals, and repetition compensate for unknown words.
+_COMPREHENSION_THRESHOLD = 0.95
 
 
 def _is_learnable(token) -> bool:
@@ -124,11 +127,18 @@ def generate_vocab_summary(
                 lemma_key_to_info[key].count += 1
                 continue
 
-            # First occurrence — compute frequency and CEFR
-            zipf = zipf_frequency(lemma, language)
-            if zipf == 0:
-                # Fallback: try surface form
-                zipf = zipf_frequency(token.text.lower(), language)
+            # First occurrence — compute frequency and CEFR.
+            # Use max(lemma, surface) because small spaCy models often
+            # produce truncated lemmas (idée→ider, vivre→vivr) that match
+            # obscure words with very low zipf, inflating difficulty.
+            surface = token.text.lower()
+            zipf_lemma = zipf_frequency(lemma, language)
+            zipf_surface = zipf_frequency(surface, language)
+            if zipf_surface > zipf_lemma:
+                zipf = zipf_surface
+                lemma = surface  # prefer surface form when lemma is wrong
+            else:
+                zipf = zipf_lemma
             cefr = zipf_to_cefr(zipf)
             cefr_counts[cefr] += 1
 
@@ -146,26 +156,32 @@ def generate_vocab_summary(
                 translation=translation,
             )
 
-    # Estimate video difficulty from the hardest real vocabulary.
-    # Filter out zipf=0 (ASR errors, unknown tokens) and use the top percentile
-    # of known words — a news broadcast's difficulty is defined by words like
-    # "extradition" and "belligérant", not by the fact it also uses "le" and "de".
+    # Estimate difficulty via comprehension threshold: find the lowest CEFR
+    # level at which a learner would know ≥95% of the word tokens.
+    # A learner at level L is assumed to know all words at level ≤L.
+    # ASR errors (zipf < _MIN_ZIPF) are excluded from the token pool since
+    # they aren't real vocabulary a learner would encounter.
+    estimated_level = "A1"
+    coverage: dict[str, float] = {}
+    token_distribution: dict[str, int] = {}
     if lemma_key_to_info:
-        known_words = [info for info in lemma_key_to_info.values() if info.zipf >= _MIN_ZIPF]
-        if known_words:
-            known_words.sort(key=lambda w: w.zipf)
-            n_hard = max(1, int(len(known_words) * _DIFFICULTY_PERCENTILE))
-            hardest = known_words[:n_hard]
-            total_weight = sum(w.count for w in hardest)
-            weighted_sum = sum(_CEFR_ORDER[w.cefr] * w.count for w in hardest)
-            avg_level = weighted_sum / total_weight
-        else:
-            avg_level = 1.0
-        level_names = list(_CEFR_ORDER.keys())
-        level_idx = min(max(round(avg_level) - 1, 0), len(level_names) - 1)
-        estimated_level = level_names[level_idx]
-    else:
-        estimated_level = "A1"
+        # Count tokens per CEFR level (with repetition)
+        level_tokens: Counter[str] = Counter()
+        for info in lemma_key_to_info.values():
+            if info.zipf >= _MIN_ZIPF:
+                level_tokens[info.cefr] += info.count
+        known_pool = sum(level_tokens.values())
+        if known_pool > 0:
+            cumulative = 0
+            for level in _CEFR_ORDER:
+                cumulative += level_tokens.get(level, 0)
+                pct = round(cumulative / known_pool, 4)
+                coverage[level] = pct
+                token_distribution[level] = level_tokens.get(level, 0)
+                if pct >= _COMPREHENSION_THRESHOLD and estimated_level == "A1":
+                    estimated_level = level
+            if estimated_level == "A1" and coverage.get("C2", 0) < _COMPREHENSION_THRESHOLD:
+                estimated_level = "C2"
 
     # Sort by zipf ascending (rarest first), then by count descending.
     # Exclude zipf=0 words — these are ASR errors, not real vocabulary.
@@ -179,6 +195,8 @@ def generate_vocab_summary(
         "unique_words": len({info.word.lower() for info in lemma_key_to_info.values()}),
         "unique_lemmas": len(lemma_key_to_info),
         "cefr_distribution": {level: cefr_counts.get(level, 0) for level in _CEFR_ORDER},
+        "token_distribution": token_distribution,
+        "coverage": coverage,
         "estimated_level": estimated_level,
         "top_rare_words": [
             {

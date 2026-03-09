@@ -45,6 +45,35 @@ SPACY_MODELS: dict[str, str] = {
     "zh": "zh_core_web_sm",
 }
 
+# Larger models for vocabulary analysis (better lemmatization + POS accuracy).
+# Used when enable_lemmatizer=True; falls back to SPACY_MODELS if unavailable.
+SPACY_VOCAB_MODELS: dict[str, str] = {
+    "ca": "ca_core_news_md",
+    "da": "da_core_news_md",
+    "de": "de_core_news_md",
+    "el": "el_core_news_md",
+    "en": "en_core_web_md",
+    "es": "es_core_news_md",
+    "fi": "fi_core_news_md",
+    "fr": "fr_core_news_md",
+    "hr": "hr_core_news_md",
+    "it": "it_core_news_md",
+    "ja": "ja_core_news_md",
+    "ko": "ko_core_news_md",
+    "lt": "lt_core_news_md",
+    "mk": "mk_core_news_md",
+    "nb": "nb_core_news_md",
+    "nl": "nl_core_news_md",
+    "pl": "pl_core_news_md",
+    "pt": "pt_core_news_md",
+    "ro": "ro_core_news_md",
+    "ru": "ru_core_news_md",
+    "sl": "sl_core_news_md",
+    "sv": "sv_core_news_md",
+    "uk": "uk_core_news_md",
+    "zh": "zh_core_web_md",
+}
+
 # Separate caches for different configurations
 _cache_pos_only: dict[str, object] = {}
 _cache_with_lemma: dict[str, object] = {}
@@ -93,7 +122,11 @@ def load_spacy_model(
         cache[language] = None
         return None
 
-    model_name = SPACY_MODELS.get(language)
+    # Use larger _md models for vocab analysis (better lemmatization)
+    if enable_lemmatizer:
+        model_name = SPACY_VOCAB_MODELS.get(language) or SPACY_MODELS.get(language)
+    else:
+        model_name = SPACY_MODELS.get(language)
     if model_name is None:
         cache[language] = None
         return None
@@ -107,15 +140,30 @@ def load_spacy_model(
     try:
         nlp = spacy.load(model_name, disable=disable)
     except OSError:
-        # Model not installed — auto-download via uv (preferred) or pip
+        # Model not installed — auto-download
         stage("Downloading spaCy model", model_name)
         try:
             _install_spacy_model(model_name)
             nlp = spacy.load(model_name, disable=disable)
         except (SystemExit, Exception):
-            warning(f"Could not load spaCy model {model_name}, skipping.")
-            cache[language] = None
-            return None
+            # _md model may not exist; fall back to _sm
+            fallback = SPACY_MODELS.get(language)
+            if fallback and fallback != model_name:
+                try:
+                    nlp = spacy.load(fallback, disable=disable)
+                except OSError:
+                    stage("Downloading spaCy model", fallback)
+                    try:
+                        _install_spacy_model(fallback)
+                        nlp = spacy.load(fallback, disable=disable)
+                    except (SystemExit, Exception):
+                        warning(f"Could not load spaCy model {fallback}, skipping.")
+                        cache[language] = None
+                        return None
+            else:
+                warning(f"Could not load spaCy model {model_name}, skipping.")
+                cache[language] = None
+                return None
 
     cache[language] = nlp
     return nlp

@@ -1,71 +1,93 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="color-scheme" content="light dark">
-<title>{title} — PolyglotWhisperer</title>
-<link rel="stylesheet"
-  href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.classless.min.css">
-<link rel="icon" type="image/png" href="{base_url}/icon.png">
-<link rel="stylesheet" href="{base_url}/player.css">
-</head>
-<body>
-<header>
-  <hgroup>
-    <h1>{title}</h1>
-    {brand}
-  </hgroup>
-  <button id="theme-toggle" class="outline secondary"
-    aria-label="Toggle theme"></button>
-</header>
-<main>
-  {video_section}
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>{title} — PolyglotWhisperer</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.classless.min.css"
+    />
+    <link rel="icon" type="image/png" href="{base_url}/icon.png" />
+    <link rel="stylesheet" href="{base_url}/player.css" />
+  </head>
+  <body>
+    <header>
+      <hgroup>
+        <h1>{title}</h1>
+        {brand}
+      </hgroup>
+      <button
+        id="theme-toggle"
+        class="outline secondary"
+        aria-label="Toggle theme"
+      ></button>
+    </header>
+    <main>
+      {video_section}
 
-  <div class="tracks" id="track-controls"></div>
+      <div class="tracks" id="track-controls"></div>
 
-  <div class="transcript" id="transcript" role="region" aria-label="Transcript">
-    <div class="transcript-header">
-      <i data-lucide="scroll-text"></i> Transcript
-    </div>
-    <span class="copy-toast" id="copy-toast" role="status" aria-live="polite">
-      <i data-lucide="check"></i> Copied
-    </span>
-    <div class="transcript-body" id="transcript-body"></div>
-  </div>
+      <div
+        class="transcript"
+        id="transcript"
+        role="region"
+        aria-label="Transcript"
+      >
+        <div class="transcript-header">
+          <i data-lucide="scroll-text"></i> Transcript
+        </div>
+        <span
+          class="copy-toast"
+          id="copy-toast"
+          role="status"
+          aria-live="polite"
+        >
+          <i data-lucide="check"></i> Copied
+        </span>
+        <div class="transcript-body" id="transcript-body"></div>
+      </div>
 
-  <div class="panel">
-    <article>
-      <div class="section-label">
-        <i data-lucide="info"></i> Details
+      <div class="panel">
+        <article>
+          <div class="section-label"><i data-lucide="info"></i> Details</div>
+          <div class="meta-list">
+            <dl>{metadata_rows}</dl>
+          </div>
+        </article>
+        <article>
+          <div class="section-label">
+            <i data-lucide="download"></i> Downloads
+          </div>
+          <div class="dl-list">
+            <ul>
+              {download_rows}
+            </ul>
+          </div>
+        </article>
       </div>
-      <div class="meta-list">
-        <dl>{metadata_rows}</dl>
-      </div>
-    </article>
-    <article>
-      <div class="section-label">
-        <i data-lucide="download"></i> Downloads
-      </div>
-      <div class="dl-list">
-        <ul>{download_rows}</ul>
-      </div>
-    </article>
-  </div>
-</main>
-<footer>
-  <p><img src="{base_url}/logo.png" class="footer-logo" alt="PolyglotWhisperer"></p>
-  <p>
-    <span class="footer-brand">PolyglotWhisperer</span>
-    <span class="footer-sep">&middot;</span>
-    <em>Video transcription &amp; translation for language learners</em>
-  </p>
-  <p>
-    <a class="footer-gh" href="{github_url}" target="_blank"
-      rel="noopener"><i data-lucide="github"></i> GitHub</a>
-  </p>
-</footer>
-<script src="https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.min.js"></script>
-<script src="{base_url}/player.js"></script>
-</body>
+    </main>
+    <footer>
+      <p>
+        <img
+          src="{base_url}/logo.png"
+          class="footer-logo"
+          alt="PolyglotWhisperer"
+        />
+      </p>
+      <p>
+        <span class="footer-brand">PolyglotWhisperer</span>
+        <span class="footer-sep">&middot;</span>
+        <em>Video transcription &amp; translation for language learners</em>
+      </p>
+      <p>
+        <a class="footer-gh" href="{github_url}" target="_blank" rel="noopener"
+          ><i data-lucide="github"></i> GitHub</a
+        >
+      </p>
+    </footer>
+    <script src="https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.min.js"></script>
+    <script src="{base_url}/player.js"></script>
+  </body>
 </html>
