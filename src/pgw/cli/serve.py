@@ -25,6 +25,7 @@ from pgw.utils.paths import (
     GLOB_BILINGUAL_VTT,
     GLOB_TRANSCRIPTION_VTT,
     GLOB_TRANSLATION_VTT,
+    GLOB_VOCABULARY_JSON,
     METADATA_FILE,
     find_video,
 )
@@ -318,6 +319,105 @@ def _build_download_rows(
     return "\n        ".join(rows) if rows else "<li>No files available</li>"
 
 
+_CEFR_COLORS = {
+    "A1": "#2e7d32",
+    "A2": "#558b2f",
+    "B1": "#f57f17",
+    "B2": "#e65100",
+    "C1": "#c62828",
+    "C2": "#6a1b9a",
+}
+
+_CEFR_ORDER = ["A1", "A2", "B1", "B2", "C1", "C2"]
+
+
+def _build_vocab_section(workspace: Path) -> str:
+    """Build the vocabulary analysis card HTML, or empty string if unavailable."""
+    vocab_files = list(workspace.glob(GLOB_VOCABULARY_JSON))
+    if not vocab_files:
+        return ""
+
+    try:
+        summary = json.loads(vocab_files[0].read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return ""
+
+    dist = summary.get("cefr_distribution", {})
+    total_types = sum(dist.values()) or 1
+    estimated = summary.get("estimated_level", "?")
+    unique = summary.get("unique_lemmas", 0)
+
+    # CEFR bar
+    bar_parts = []
+    for level in _CEFR_ORDER:
+        count = dist.get(level, 0)
+        if count == 0:
+            continue
+        pct = count / total_types * 100
+        color = _CEFR_COLORS[level]
+        bar_parts.append(
+            f'<span style="width:{pct:.1f}%;background:{color}" '
+            f'title="{level}: {count}"></span>'
+        )
+
+    # CEFR legend
+    legend_parts = []
+    for level in _CEFR_ORDER:
+        count = dist.get(level, 0)
+        if count == 0:
+            continue
+        color = _CEFR_COLORS[level]
+        legend_parts.append(
+            f'<span class="vocab-chip">'
+            f'<span style="background:{color}" class="vocab-dot"></span>'
+            f"{level} <small>({count})</small></span>"
+        )
+
+    # Top rare words table (show first 10 in the player)
+    words = summary.get("top_rare_words", [])[:10]
+    word_rows = []
+    for w in words:
+        cefr = w.get("cefr", "")
+        color = _CEFR_COLORS.get(cefr, "#888")
+        ctx = html.escape(w.get("context", ""))
+        trans = html.escape(w.get("translation", ""))
+        word_rows.append(
+            f"<tr>"
+            f'<td class="vocab-word">{html.escape(w["word"])}</td>'
+            f'<td><span class="vocab-badge" '
+            f'style="background:{color}">{cefr}</span></td>'
+            f'<td class="vocab-ctx">{ctx}</td>'
+            f'<td class="vocab-trans">{trans}</td>'
+            f"</tr>"
+        )
+
+    words_table = ""
+    if word_rows:
+        words_table = (
+            '<table class="vocab-table">'
+            "<thead><tr><th>Word</th><th></th>"
+            "<th>Context</th><th>Translation</th></tr></thead>"
+            f'<tbody>{"".join(word_rows)}</tbody></table>'
+        )
+
+    return (
+        "<article>"
+        '<div class="section-label">'
+        '<i data-lucide="book-open"></i> Vocabulary</div>'
+        '<div class="vocab-stats">'
+        f'<span class="vocab-stat">'
+        f"<strong>{unique:,}</strong> unique lemmas</span>"
+        f'<span class="vocab-stat">Estimated '
+        f'<strong style="color:{_CEFR_COLORS.get(estimated, "#888")}">'
+        f"{estimated}</strong></span>"
+        "</div>"
+        f'<div class="vocab-bar">{"".join(bar_parts)}</div>'
+        f'<div class="vocab-legend">{"".join(legend_parts)}</div>'
+        f"{words_table}"
+        "</article>"
+    )
+
+
 def _find_sibling_workspaces(workspace: Path, base_dir: Path) -> list[Path]:
     """Find other workspaces for the same source video.
 
@@ -423,6 +523,7 @@ def _build_html(
         brand=brand,
         video_section=video_section,
         metadata_rows=_build_metadata_rows(meta),
+        vocab_section=_build_vocab_section(workspace),
         download_rows=_build_download_rows(workspace, meta, url_prefix, sibling_paths),
         github_url=GITHUB_URL,
     )

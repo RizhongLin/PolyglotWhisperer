@@ -376,6 +376,29 @@ def run_pipeline(
             "Vocabulary",
             f"{summary['unique_lemmas']} unique lemmas, estimated {summary['estimated_level']}",
         )
+
+        # Vocabulary PDF/EPUB export (best-effort)
+        try:
+            from pgw.subtitles.export import export_vocab_pdf
+
+            vocab_pdf = workspace / f"{STEM_VOCABULARY}.{language}.pdf"
+            export_vocab_pdf(summary, vocab_pdf, title=title)
+            saved.append(vocab_pdf)
+        except ImportError:
+            pass
+        except Exception as e:
+            warning(f"Vocabulary PDF skipped: {e}")
+
+        try:
+            from pgw.subtitles.export import export_vocab_epub
+
+            vocab_epub = workspace / f"{STEM_VOCABULARY}.{language}.epub"
+            export_vocab_epub(summary, vocab_epub, title=title)
+            saved.append(vocab_epub)
+        except ImportError:
+            pass
+        except Exception as e:
+            warning(f"Vocabulary EPUB skipped: {e}")
     except ImportError:
         pass  # wordfreq or spacy not installed
     except Exception as e:
