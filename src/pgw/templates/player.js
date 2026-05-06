@@ -394,5 +394,159 @@ window.redownload = async function () {
   }
 };
 
+// --- Vocabulary lookup ---
+var _vocabMap = {};
+var _vocabPopover = null;
+
+(function initVocab() {
+  // Find vocabulary JSON link from downloads section
+  var vocabLink = null;
+    var links = document.querySelectorAll(".downloads a[download]");
+    for (var i = 0; i < links.length; i++) {
+      if (links[i].href.indexOf("vocabulary") > -1) {
+        vocabLink = links[i];
+        break;
+      }
+    }
+  }
+  if (!vocabLink) return;
+
+  fetch(vocabLink.href)
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      var words = data.top_rare_words || [];
+      words.forEach(function (w) {
+        _vocabMap[w.word.toLowerCase()] = w;
+        _vocabMap[w.lemma.toLowerCase()] = w;
+      });
+    })
+    .catch(function () {});
+
+  // Create popover element
+  _vocabPopover = document.createElement("div");
+  _vocabPopover.className = "vocab-popover";
+  _vocabPopover.style.display = "none";
+  document.body.appendChild(_vocabPopover);
+
+  // Delegated click handler on transcript
+  document.addEventListener("click", function (e) {
+    if (_vocabPopover.style.display === "block") {
+      _vocabPopover.style.display = "none";
+    }
+    var wordEl = e.target.closest(".cue-text");
+    if (!wordEl) return;
+
+    var sel = window.getSelection();
+    var clickedWord = sel.toString().trim().toLowerCase();
+    if (!clickedWord) {
+      // Try to find word at click position by word-breaking
+      var range = document.caretRangeFromPoint(e.clientX, e.clientY);
+      if (!range) return;
+      range.expand("word");
+      clickedWord = range.toString().trim().toLowerCase();
+    }
+    if (!clickedWord || clickedWord.length < 3) return;
+
+    var info = _vocabMap[clickedWord];
+    if (!info) return;
+
+    _vocabPopover.innerHTML =
+      '<div class="vp-word">' +
+      info.word +
+      '</div><div class="vp-diff" style="background:' +
+      (_DIFFICULTY_COLORS && _DIFFICULTY_COLORS[info.difficulty]
+        ? _DIFFICULTY_COLORS[info.difficulty]
+        : "#888") +
+      '">' +
+      (info.difficulty || "?") +
+      "</div>" +
+      (info.translation
+        ? '<div class="vp-trans">' + info.translation + "</div>"
+        : "") +
+      (info.context
+        ? '<div class="vp-ctx">' + info.context + "</div>"
+        : "");
+    var rect = wordEl.getBoundingClientRect();
+    _vocabPopover.style.left =
+      Math.min(rect.left, window.innerWidth - 260) + "px";
+    _vocabPopover.style.top = (rect.bottom + 4) + "px";
+    _vocabPopover.style.display = "block";
+    e.stopPropagation();
+  });
+
+  document.addEventListener("click", function () {
+    if (_vocabPopover) _vocabPopover.style.display = "none";
+  });
+})();
+
+// Difficulty colors (inlined for JS use)
+var _DIFFICULTY_COLORS = {
+  A1: "#2e7d32",
+  A2: "#558b2f",
+  B1: "#f57f17",
+  B2: "#e65100",
+  C1: "#c62828",
+  C2: "#6a1b9a",
+};
+
+// --- Keyboard shortcuts ---
+document.addEventListener("keydown", (e) => {
+  if (!video) return;
+  const tag = document.activeElement?.tagName?.toLowerCase();
+  if (tag === "input" || tag === "textarea") return;
+
+  switch (e.key) {
+    case "ArrowLeft":
+      video.currentTime = Math.max(0, video.currentTime - 5);
+      break;
+    case "ArrowRight":
+      video.currentTime = Math.min(video.duration || Infinity, video.currentTime + 5);
+      break;
+    case "ArrowUp":
+    case "ArrowDown": {
+      const rows = transcriptBody.querySelectorAll(".cue-row");
+      if (!rows.length) break;
+      let cur = activeRow >= 0 ? activeRow : 0;
+      cur = e.key === "ArrowUp" ? Math.max(0, cur - 1) : Math.min(rows.length - 1, cur + 1);
+      if (cur < transcriptCues.length) {
+        video.currentTime = transcriptCues[cur].startTime;
+        if (video.paused) video.play();
+      }
+      break;
+    }
+    case " ":
+      if (!e.target.closest("button, a, [role=button]")) {
+        e.preventDefault();
+        video.paused ? video.play() : video.pause();
+      }
+      break;
+    case "f":
+      if (document.fullscreenElement) {
+        document.exitFullscreen();
+      } else {
+        video.requestFullscreen();
+      }
+      break;
+    case "1":
+      video.playbackRate = 0.75;
+      break;
+    case "2":
+      video.playbackRate = 1.0;
+      break;
+    case "3":
+      video.playbackRate = 1.5;
+      break;
+  }
+});
+
+// Build transcript helper ref for seek
+// (exported for use elsewhere)
+var _pgwSeekTo = function (t) {
+  if (video) {
+    video.currentTime = t;
+    if (video.paused) video.play();
+  }
+};
+
 // Render all Lucide icons
 lucide.createIcons();

@@ -14,6 +14,7 @@ from pgw.llm.prompts import (
     TRANSLATION_SYSTEM,
     TRANSLATION_USER,
     UNTRANSLATED_MARKER,
+    build_translation_schema,
     filter_empty_segments,
     format_bilingual_context,
     format_history_context,
@@ -102,7 +103,12 @@ def process_chunk(
         },
     ]
 
-    response = complete(messages, config, response_format={"type": "json_object"})
+    response = complete(
+        messages,
+        config,
+        json_schema=build_translation_schema(len(texts)),
+        expected_count=len(texts),
+    )
     translated_texts, exact_match = parse_response(response, len(texts))
 
     if exact_match or len(texts) <= 2:
@@ -133,13 +139,18 @@ def process_chunk(
         reask_msg = (
             f"You returned {parsed_count} items but I need exactly "
             f"{len(texts)} translations. Please return a JSON object with "
-            f'keys "1" through "{len(texts)}", each mapped to its translation.'
+            f'a "translations" array of exactly {len(texts)} items.'
         )
         retry_messages = messages + [
             {"role": "assistant", "content": response},
             {"role": "user", "content": reask_msg},
         ]
-        response2 = complete(retry_messages, config, response_format={"type": "json_object"})
+        response2 = complete(
+            retry_messages,
+            config,
+            json_schema=build_translation_schema(len(texts)),
+            expected_count=len(texts),
+        )
         translated_texts2, exact_match2 = parse_response(response2, len(texts))
         if exact_match2:
             return translated_texts2

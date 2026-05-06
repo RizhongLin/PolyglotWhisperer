@@ -4,241 +4,179 @@
 
 <h1 align="center">PolyglotWhisperer</h1>
 
-<p align="center">Video transcription and translation CLI for language learners.<br>Transcribe with Whisper (local or cloud API), translate with LLMs, play with dual subtitles — all in one pipeline.</p>
+<p align="center">Video transcription and translation CLI for language learners.<br>Transcribe, refine, translate, and study — all in one pipeline.</p>
 
-## Features
+## Setup
 
-- **Whisper transcription** with word-level timestamps — local (stable-ts, MLX/CUDA/CPU) or cloud API (Groq, OpenAI via LiteLLM)
-- **Smart subtitle segmentation** — spaCy POS tagging fixes dangling articles, prepositions, and Romance clitics (l', d', qu') across 26 languages
-- **Subtitle download** — optionally grabs existing subtitles from YouTube/etc. via yt-dlp (human-made preferred, `--subs` to enable), skips Whisper when available
-- **LLM translation** — any language pair via Ollama (local) or cloud LLMs (Groq, OpenAI, Claude, etc.)
-- **Vocabulary analysis** — CEFR difficulty estimation (A1–C2), rare word extraction with context and translations
-- **Dual playback** — original + translation subtitles in mpv, or browser-based web player (`pgw serve`)
-- **Batch processing** — multiple files, glob patterns, URL lists, with error-continue
-- **Export** — VTT, SRT, ASS, plain text, bilingual VTT, side-by-side PDF/EPUB
-- **Shared cache** — deduplicates downloads, audio extraction, and transcriptions across workspaces
-
-## Quick Start
-
-### Prerequisites
-
-- Python 3.12+, [uv](https://docs.astral.sh/uv/), [ffmpeg](https://ffmpeg.org/)
-- Optional: [mpv](https://mpv.io/) (playback), [Ollama](https://ollama.com/) (local LLM)
-
-```bash
-# macOS
-brew install uv ffmpeg mpv
-brew install pango           # required for PDF export (WeasyPrint)
-brew install --cask ollama   # optional
-
-# Ubuntu/Debian
-sudo apt install ffmpeg mpv libpango-1.0-0 libpangoft2-1.0-0
-curl -fsSL https://astral.sh/uv/install.sh | sh
-curl -fsSL https://ollama.com/install.sh | sh   # optional
-```
-
-> **macOS PDF export:** If PDF export fails with `cannot load library 'libgobject-2.0-0'`, add this to your `~/.zshrc`:
->
-> ```bash
-> export DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib
-> ```
->
-> This lets the uv-managed Python find Homebrew's native libraries.
-
-### Installation
+**Prerequisites:** Python 3.12+, [uv](https://docs.astral.sh/uv/), [ffmpeg](https://ffmpeg.org/)
+(optional: [mpv](https://mpv.io/), [Ollama](https://ollama.com/))
 
 ```bash
 git clone https://github.com/RizhongLin/PolyglotWhisperer.git
 cd PolyglotWhisperer
 uv sync --all-extras
 
-# Pull a local LLM for translation (optional)
-ollama pull qwen3:8b
+# API keys (optional — only for cloud providers)
+cp .env.example .env
 ```
 
-spaCy language models are downloaded automatically on first use.
+spaCy language models download automatically on first use.
 
-<details>
-<summary>Install only what you need</summary>
+## Basic Usage
 
 ```bash
-uv sync --extra transcribe    # Local Whisper (stable-ts, MLX)
-uv sync --extra download      # URL downloading (yt-dlp)
-uv sync --extra llm           # LLM translation (LiteLLM, Ollama)
-uv sync --extra nlp           # spaCy NLP (POS tagging, lemmatizer)
-uv sync --extra vocab         # Vocabulary analysis (wordfreq + spaCy)
-uv sync --extra export        # PDF/EPUB export (WeasyPrint, ebooklib)
+# Full pipeline: download → transcribe → refine → translate
+pgw run video.mp4 -l fr --refine --translate en
+
+# From a URL (requires yt-dlp)
+pgw run "https://youtube.com/watch?v=..." -l fr --translate en
+
+# Cloud backends (no GPU needed)
+pgw run video.mp4 --backend api --llm-backend api --translate en
+
+# Skip transcription — use existing subtitles from the video page
+pgw run "https://youtube.com/watch?v=..." --subs --translate en
 ```
 
-</details>
+All pipeline output lands in `pgw_workspace/<slug>/<timestamp>/` alongside a `metadata.json`.
 
-### API Keys (for cloud providers)
+## Commands
 
-```bash
-cp .env.example .env   # edit and add your keys
-```
+| Command          | Purpose                                                |
+| ---------------- | ------------------------------------------------------ |
+| `pgw run`        | Full pipeline: download, transcribe, refine, translate |
+| `pgw transcribe` | Whisper transcription only (local or cloud API)        |
+| `pgw translate`  | Translate existing subtitle files                      |
+| `pgw refine`     | Fix ASR errors in subtitles with an LLM                |
+| `pgw vocab`      | Vocabulary analysis (difficulty tiers, rare words)     |
+| `pgw export`     | Export vocabulary as CSV for Anki/spreadsheet          |
+| `pgw play`       | Play video with dual subtitles via mpv                 |
+| `pgw serve`      | Launch web player for a workspace (or library view)    |
+| `pgw clean`      | Clear cached files (downloads, audio, transcriptions)  |
+| `pgw languages`  | List all supported languages                           |
 
-LiteLLM routes to any provider via model prefix — set the matching API key in `.env`. See `.env.example` for supported providers.
+## Backends
 
-### Usage
+| Component                | Local (default)          | Cloud API                            |
+| ------------------------ | ------------------------ | ------------------------------------ |
+| Transcription            | stable-ts (MLX/CUDA/CPU) | LiteLLM → Groq, OpenAI, etc.         |
+| Translation / Refinement | Ollama                   | LiteLLM → Groq, OpenAI, Claude, etc. |
 
-```bash
-# Full pipeline: download → transcribe → translate → play
-pgw run "https://example.com/video" --translate en --no-play
-
-# Refine transcription with LLM before translating
-pgw run "https://example.com/video" --refine --translate en --no-play
-
-# Cloud API transcription + translation (no local GPU needed)
-pgw run "https://example.com/video" --backend api --llm-backend api --translate en --no-play
-
-# Reuse existing subtitles from video page (skip Whisper if available)
-pgw run "https://example.com/video" --subs --translate en --no-play
-
-# Batch processing
-pgw run *.mp4 --translate en --no-play
-pgw run urls.txt --backend api --translate en --no-play
-
-# Transcribe only
-pgw transcribe video.mp4 -l fr
-pgw transcribe *.mp4 --backend api -l fr
-
-# Translate existing subtitles
-pgw translate subtitles.fr.vtt --to en
-
-# Vocabulary analysis
-pgw vocab pgw_workspace/my-video/20260217_164802/
-
-# Playback
-pgw play pgw_workspace/my-video/20260217_164802/
-pgw serve pgw_workspace/my-video/20260217_164802/   # web player
-```
-
-### Configuration
-
-Config layers (lowest to highest priority): packaged defaults → `~/.config/pgw/config.toml` → `./pgw.toml` → `.env` + env vars → CLI flags.
+Any OpenAI SDK-compatible server works too — set `api_base`, `api_key`, and `api_model`:
 
 ```toml
 # pgw.toml
 [whisper]
-backend = "api"                       # "local" or "api"
-api_model = "groq/whisper-large-v3-turbo"  # provider/model via LiteLLM
+backend = "api"
+api_base = "https://your-whisper-server/v1"
+api_key = "sk-..."
+api_model = "openai/whisper-1"
+
+[llm]
+backend = "api"
+api_base = "https://your-llm-server/v1"
+api_key = "sk-..."
+api_model = "openai/meta-llama-3.1-8b-instruct"
+```
+
+```bash
+# Per-run overrides
+pgw run video.mp4 -l fr --backend api --whisper-model groq/whisper-large-v3-turbo
+pgw run video.mp4 -l fr --llm-backend api --llm-model groq/openai/gpt-oss-120b
+```
+
+For local LLM, pull a model first: `ollama pull qwen3:8b`
+
+## Configuration
+
+Four layers, lowest to highest: **packaged defaults** → `~/.config/pgw/config.toml` → `./pgw.toml` → `.env` / env vars → CLI flags.
+
+```toml
+# pgw.toml
+[whisper]
+backend = "api"
 language = "fr"
 
 [llm]
-backend = "api"                       # "local" or "api"
-local_model = "ollama_chat/qwen3:8b"  # Ollama for local backend
-api_model = "openrouter/openai/gpt-oss-120b"  # any LiteLLM provider/model
+backend = "api"
 target_language = "en"
 ```
 
-Environment variables use `PGW_` prefix: `PGW_WHISPER__BACKEND=api`, `PGW_LLM__BACKEND=api`, `PGW_LLM__API_MODEL=<provider/model>`.
+Env vars use `PGW_` prefix: `PGW_WHISPER__BACKEND=api`, `PGW_LLM__API_MODEL=groq/...`. See `.env.example` for all options.
 
-### Workspace Output
-
-```plaintext
-pgw_workspace/
-├── .cache/                           # Shared cache (cross-workspace)
-│   ├── audio/                        # Extracted audio
-│   ├── compressed/                   # API-compressed MP3s
-│   ├── transcriptions/               # Whisper results (local + API)
-│   └── downloads/                    # yt-dlp downloads + subtitles
-└── my-video/
-    └── 20260217_164802/
-        ├── video.mp4                 # Symlinked from source
-        ├── audio.wav                 # Symlinked from cache
-        ├── transcription.fr.vtt      # Original subtitles (from Whisper or downloaded)
-        ├── transcription.fr.txt      # Plain text
-        ├── translation.en.vtt        # Translated subtitles
-        ├── translation.en.txt        # Translation plain text
-        ├── bilingual.fr-en.vtt       # Dual-language VTT
-        ├── parallel.fr-en.pdf        # Side-by-side PDF
-        ├── parallel.fr-en.epub       # Side-by-side EPUB
-        ├── vocabulary.fr.json        # CEFR analysis + rare words
-        └── metadata.json
-```
-
-## Transcription Backends
-
-| Backend             | Technology                                        | Pros                                                   | Limits                         |
-| ------------------- | ------------------------------------------------- | ------------------------------------------------------ | ------------------------------ |
-| **Local** (default) | [stable-ts](https://github.com/jianfch/stable-ts) | Best quality, word-level timestamps, custom regrouping | Requires GPU / model downloads |
-| **Cloud API**       | [LiteLLM](https://github.com/BerriAI/litellm)     | Fast, cheap, no GPU, auto-compresses large files       | API key required               |
+## Web Player
 
 ```bash
-# Local
-pgw transcribe audio.wav -l fr                              # large-v3-turbo on MLX
-pgw transcribe audio.wav -l fr --whisper-model medium        # smaller model
-
-# Cloud API (any LiteLLM-supported provider)
-pgw transcribe audio.wav --backend api -l fr
-pgw transcribe audio.wav --backend api --whisper-model openai/whisper-1 -l fr
+pgw serve                      # library view of all workspaces
+pgw serve <workspace-dir>       # single video player
 ```
 
-## Vocabulary Analysis
+The player includes keyboard shortcuts (← → ↑ ↓ Space f 1-3), click-to-seek in transcript, and click-any-word to reveal difficulty + translation when vocabulary data is available.
 
-Each processed video gets a vocabulary profile: CEFR level estimation via [wordfreq](https://github.com/rspeer/wordfreq), top 30 rare words with context and translation, spaCy lemmatization to group inflected forms.
+## Vocabulary
+
+Each run generates a `vocabulary.<lang>.json` in the workspace. Difficulty tiers (A1–C2) are estimated from word frequency — approximations, not official CEFR levels.
 
 ```bash
-pgw vocab pgw_workspace/my-video/20260217_164802/ --top 50
+pgw vocab <workspace> --top 50          # terminal view
+pgw export <workspace>                   # → vocabulary.csv for Anki
 ```
 
-## How It Works
+## Docker
 
-```plaintext
-Video/Audio/URL
-  → Download (yt-dlp, cached) + fetch existing subtitles
-  → Extract Audio (ffmpeg, cached)
-  → Use downloaded subtitles OR Transcribe (Whisper + spaCy segmentation)
-  → Refine transcription (LLM, optional — fixes ASR errors, punctuation)
-  → Translate (LLM, optional — sentence-boundary chunking with overlap)
-  → Export (VTT/TXT/bilingual VTT/PDF/EPUB) + Vocabulary Analysis
-  → Play (mpv or web player)
+```bash
+docker build -t pgw .
+```
+
+All commands work inside Docker — mount your project at `/data` and ensure `.env` has your API keys:
+
+```bash
+# Web player
+docker run --rm -it -p 8321:8321 -v "$PWD:/data" pgw serve --no-open
+
+# Full pipeline
+docker run --rm -it -v "$PWD:/data" pgw run /data/video.mp4 -l fr \
+  --translate en --backend api --llm-backend api --no-play
+```
+
+**Dev mode** — mount `src/` to skip rebuilds on code changes:
+
+```bash
+docker run --rm -it -p 8321:8321 \
+  -v "$PWD:/data" -v "$PWD/src:/app/src" \
+  pgw serve --no-open
+```
+
+Only `pyproject.toml` or `uv.lock` changes require a rebuild.
+
+## Architecture
+
+```
+src/pgw/
+├── cli/          Typer commands (run, transcribe, translate, etc.)
+├── core/         Config (Pydantic), pipeline orchestrator, events
+├── downloader/   yt-dlp wrapper, URL resolver
+├── llm/          LiteLLM client, translation, refinement, prompts
+├── server/       Web player HTTP handlers + HTML templates
+├── subtitles/    Format conversion (VTT/SRT), PDF/EPUB export
+├── transcriber/  Whisper backends (stable-ts local + API), segmentation
+├── templates/    HTML/CSS/JS for web player and library
+├── utils/        Audio extraction, cache, logging, spaCy, paths
+└── vocab/        Vocabulary analysis + CEFR estimation
 ```
 
 ## Tech Stack
 
-| Component     | Technology                                                                                                                     |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| Transcription | [stable-ts](https://github.com/jianfch/stable-ts) (MLX/CUDA/CPU)                                                               |
-| Cloud APIs    | [LiteLLM](https://github.com/BerriAI/litellm) (Groq, OpenAI, Ollama, Claude)                                                   |
-| NLP           | [spaCy](https://spacy.io/) (26 language codes) + [wordfreq](https://github.com/rspeer/wordfreq)                                |
-| Export        | [WeasyPrint](https://doc.courtbouillon.org/weasyprint/stable/) (PDF) + [ebooklib](https://github.com/aerkalov/ebooklib) (EPUB) |
-| Subtitles     | [pysubs2](https://github.com/tkarabela/pysubs2)                                                                                |
-| Download      | [yt-dlp](https://github.com/yt-dlp/yt-dlp)                                                                                     |
-| Playback      | [mpv](https://mpv.io/)                                                                                                         |
-| CLI           | [Typer](https://typer.tiangolo.com/) + [Rich](https://github.com/Textualize/rich)                                              |
-
-## Supported Languages
-
-Whisper supports **100 languages** — run `pgw languages` for the full list. spaCy POS tagging and clitic handling covers 26 language codes (including Norwegian `no`/`nn` aliases).
-
-<details>
-<summary>Common language codes</summary>
-
-| Code | Language   | Code | Language | Code | Language   |
-| ---- | ---------- | ---- | -------- | ---- | ---------- |
-| `fr` | French     | `zh` | Chinese  | `pl` | Polish     |
-| `en` | English    | `ja` | Japanese | `sv` | Swedish    |
-| `de` | German     | `ko` | Korean   | `da` | Danish     |
-| `es` | Spanish    | `ar` | Arabic   | `fi` | Finnish    |
-| `it` | Italian    | `ru` | Russian  | `uk` | Ukrainian  |
-| `pt` | Portuguese | `hi` | Hindi    | `vi` | Vietnamese |
-| `nl` | Dutch      | `tr` | Turkish  |      |            |
-
-</details>
-
-## Roadmap
-
-- [x] Whisper transcription (local + cloud API) with word-level timestamps
-- [x] LLM translation + dual subtitle playback
-- [x] spaCy subtitle segmentation + Romance clitic handling (26 language codes)
-- [x] Audio cache, batch processing, vocabulary analysis, parallel text export
-- [x] Streaming pipeline event system
-- [x] Subtitle download from video pages, web player, content-addressable cache
-- [ ] Hosted demo (Gradio on Hugging Face Spaces)
-- [ ] Speaker diarization
-- [ ] Anki card generation from subtitle pairs
+| Role          | Library                                       |
+| ------------- | --------------------------------------------- |
+| Transcription | stable-ts (local), LiteLLM (cloud)            |
+| LLMs          | LiteLLM + Ollama                              |
+| NLP           | spaCy (POS, lemmatizer), wordfreq (frequency) |
+| Subtitles     | pysubs2                                       |
+| Download      | yt-dlp                                        |
+| Export        | WeasyPrint (PDF), ebooklib (EPUB)             |
+| CLI           | Typer + Rich                                  |
+| Playback      | mpv, built-in HTTP server                     |
 
 ## License
 

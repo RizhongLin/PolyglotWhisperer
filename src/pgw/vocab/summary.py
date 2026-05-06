@@ -1,7 +1,9 @@
 """Vocabulary summary generation for subtitle segments.
 
-Analyzes word frequency and CEFR difficulty from transcribed subtitles,
-producing a per-video vocabulary profile.
+Analyzes word frequency and difficulty from transcribed subtitles,
+producing a per-video vocabulary profile.  Difficulty tiers (A1–C2)
+are estimated from word frequency — they approximate, but are not
+official CEFR levels.
 """
 
 from __future__ import annotations
@@ -15,9 +17,10 @@ from pgw.utils.spacy import load_spacy_model
 # POS tags to skip during vocabulary extraction
 _SKIP_POS = {"PUNCT", "SPACE", "NUM", "SYM", "X", "PROPN"}
 
-# CEFR bins based on wordfreq zipf_frequency values.
+# Difficulty tiers based on wordfreq zipf_frequency values.
 # zipf ≈ log10(frequency_per_billion). Higher = more common.
-_CEFR_BINS = [
+# These are frequency-based approximations, not official CEFR levels.
+_DIFFICULTY_BINS = [
     (5.0, "A1"),  # very common: the, is, I, de, le
     (4.0, "A2"),  # common: house, eat, big
     (3.0, "B1"),  # intermediate: opportunity, develop
@@ -25,7 +28,7 @@ _CEFR_BINS = [
     (1.0, "C1"),  # advanced: ubiquitous, ephemeral
 ]
 
-_CEFR_ORDER = {"A1": 1, "A2": 2, "B1": 3, "B2": 4, "C1": 5, "C2": 6}
+_DIFFICULTY_ORDER = {"A1": 1, "A2": 2, "B1": 3, "B2": 4, "C1": 5, "C2": 6}
 
 # Characters that indicate abbreviations or artifacts, not learnable vocabulary
 _ARTIFACT_CHARS = frozenset(".-/\\@#")
@@ -57,9 +60,9 @@ def _is_learnable(token) -> bool:
     return True
 
 
-def zipf_to_cefr(zipf: float) -> str:
-    """Map a wordfreq zipf_frequency value to an estimated CEFR level."""
-    for threshold, level in _CEFR_BINS:
+def zipf_to_difficulty(zipf: float) -> str:
+    """Map a wordfreq zipf_frequency value to an estimated difficulty tier."""
+    for threshold, level in _DIFFICULTY_BINS:
         if zipf > threshold:
             return level
     return "C2"
@@ -73,7 +76,7 @@ class WordInfo:
     lemma: str
     pos: str
     zipf: float
-    cefr: str
+    difficulty: str
     count: int
     context: str  # segment text where word first appeared
     translation: str  # translated segment text (if available)
@@ -111,7 +114,7 @@ def generate_vocab_summary(
     # Track unique lemmas and their info
     lemma_key_to_info: dict[tuple[str, str], WordInfo] = {}  # (lemma, pos) → WordInfo
     total_words = 0
-    cefr_counts: Counter[str] = Counter()
+    difficulty_counts: Counter[str] = Counter()
 
     for doc_idx, doc in enumerate(nlp.pipe(texts, batch_size=50)):
         for token in doc:
@@ -127,7 +130,7 @@ def generate_vocab_summary(
                 lemma_key_to_info[key].count += 1
                 continue
 
-            # First occurrence — compute frequency and CEFR.
+            # First occurrence — compute frequency and difficulty tier.
             # Use max(lemma, surface) because small spaCy models often
             # produce truncated lemmas (idée→ider, vivre→vivr) that match
             # obscure words with very low zipf, inflating difficulty.
@@ -139,8 +142,8 @@ def generate_vocab_summary(
                 lemma = surface  # prefer surface form when lemma is wrong
             else:
                 zipf = zipf_lemma
-            cefr = zipf_to_cefr(zipf)
-            cefr_counts[cefr] += 1
+            difficulty = zipf_to_difficulty(zipf)
+            difficulty_counts[difficulty] += 1
 
             context = texts[doc_idx]
             translation = trans_texts[doc_idx] if trans_texts and doc_idx < len(trans_texts) else ""
@@ -150,38 +153,38 @@ def generate_vocab_summary(
                 lemma=lemma,
                 pos=pos,
                 zipf=zipf,
-                cefr=cefr,
+                difficulty=difficulty,
                 count=1,
                 context=context,
                 translation=translation,
             )
 
-    # Estimate difficulty via comprehension threshold: find the lowest CEFR
-    # level at which a learner would know ≥95% of the word tokens.
-    # A learner at level L is assumed to know all words at level ≤L.
+    # Estimate difficulty via comprehension threshold: find the lowest
+    # difficulty tier at which a learner would know ≥95% of the word tokens.
+    # A learner at tier L is assumed to know all words at tier ≤L.
     # ASR errors (zipf < _MIN_ZIPF) are excluded from the token pool since
     # they aren't real vocabulary a learner would encounter.
-    estimated_level = "A1"
+    estimated_difficulty = "A1"
     coverage: dict[str, float] = {}
     token_distribution: dict[str, int] = {}
     if lemma_key_to_info:
-        # Count tokens per CEFR level (with repetition)
+        # Count tokens per difficulty tier (with repetition)
         level_tokens: Counter[str] = Counter()
         for info in lemma_key_to_info.values():
             if info.zipf >= _MIN_ZIPF:
-                level_tokens[info.cefr] += info.count
+                level_tokens[info.difficulty] += info.count
         known_pool = sum(level_tokens.values())
         if known_pool > 0:
             cumulative = 0
-            for level in _CEFR_ORDER:
+            for level in _DIFFICULTY_ORDER:
                 cumulative += level_tokens.get(level, 0)
                 pct = round(cumulative / known_pool, 4)
                 coverage[level] = pct
                 token_distribution[level] = level_tokens.get(level, 0)
-                if pct >= _COMPREHENSION_THRESHOLD and estimated_level == "A1":
-                    estimated_level = level
-            if estimated_level == "A1" and coverage.get("C2", 0) < _COMPREHENSION_THRESHOLD:
-                estimated_level = "C2"
+                if pct >= _COMPREHENSION_THRESHOLD and estimated_difficulty == "A1":
+                    estimated_difficulty = level
+            if estimated_difficulty == "A1" and coverage.get("C2", 0) < _COMPREHENSION_THRESHOLD:
+                estimated_difficulty = "C2"
 
     # Sort by zipf ascending (rarest first), then by count descending.
     # Exclude zipf=0 words — these are ASR errors, not real vocabulary.
@@ -194,16 +197,18 @@ def generate_vocab_summary(
         "total_words": total_words,
         "unique_words": len({info.word.lower() for info in lemma_key_to_info.values()}),
         "unique_lemmas": len(lemma_key_to_info),
-        "cefr_distribution": {level: cefr_counts.get(level, 0) for level in _CEFR_ORDER},
+        "difficulty_distribution": {
+            level: difficulty_counts.get(level, 0) for level in _DIFFICULTY_ORDER
+        },
         "token_distribution": token_distribution,
         "coverage": coverage,
-        "estimated_level": estimated_level,
+        "estimated_difficulty": estimated_difficulty,
         "top_rare_words": [
             {
                 "word": info.word,
                 "lemma": info.lemma,
                 "pos": info.pos,
-                "cefr": info.cefr,
+                "difficulty": info.difficulty,
                 "zipf": round(info.zipf, 2),
                 "count": info.count,
                 "context": info.context,

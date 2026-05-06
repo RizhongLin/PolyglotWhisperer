@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import functools
 import http.server
+import os
 import webbrowser
 from pathlib import Path
 from typing import Annotated, Optional
@@ -25,6 +26,9 @@ from pgw.server.templates import (
 )
 from pgw.utils.console import console, error, warning
 from pgw.utils.paths import find_video
+
+# Override default host from env (useful for Docker: --host 0.0.0.0)
+_DEFAULT_HOST = os.environ.get("PGW_SERVE_HOST", _DEFAULT_HOST)
 
 
 def serve(

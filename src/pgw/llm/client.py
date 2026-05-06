@@ -1,104 +1,91 @@
-"""Unified LLM client via LiteLLM with Ollama auto-pull support."""
+"""Unified LLM client via OpenAI SDK with structured output support."""
 
 from __future__ import annotations
+
+import json
+import re
+import subprocess
 
 from pgw.core.config import LLMConfig
 from pgw.utils.console import stage, warning
 
 
-def _extract_ollama_model(model_id: str) -> str | None:
-    """Extract the Ollama model name from a LiteLLM model string.
-
-    Returns None if the model is not an Ollama model.
-    E.g. "ollama_chat/qwen3:8b" -> "qwen3:8b"
-    """
-    for prefix in ("ollama_chat/", "ollama/"):
-        if model_id.startswith(prefix):
-            return model_id[len(prefix) :]
-    return None
-
-
-def ensure_ollama_model(model_id: str) -> None:
+def _ensure_ollama_model(api_base: str, model: str) -> None:
     """Pull the Ollama model if not already available locally.
 
-    No-op if the model is not an Ollama model or if ollama package
-    is not installed.
+    Uses subprocess since there is no Ollama Python dependency.
+    No-op if api_base does not point to a local Ollama instance.
     """
-    model_name = _extract_ollama_model(model_id)
-    if model_name is None:
+    if not api_base or "11434" not in api_base:
         return
 
     try:
-        import ollama
+        result = subprocess.run(["ollama", "list"], capture_output=True, text=True, timeout=5)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return
+
+    if model in result.stdout:
+        return
+
+    stage("Pulling Ollama model", model)
+    try:
+        subprocess.run(["ollama", "pull", model], capture_output=True, timeout=300)
+        stage("Model ready", model)
+    except subprocess.TimeoutExpired:
+        warning(f"Timed out pulling model {model}")
+
+
+def _make_client(config: LLMConfig):
+    """Create an OpenAI client configured from LLMConfig."""
+    try:
+        from openai import OpenAI
     except ImportError:
-        return
+        raise ImportError("openai is not installed. Install with: uv sync --extra llm")
 
-    # Check if model is already available
-    try:
-        available = {m.model for m in ollama.list().models}
-    except Exception:
-        return
-
-    if model_name in available:
-        return
-
-    # Ollama stores models as "name:tag" — check if the exact base matches with :latest
-    if ":" not in model_name and f"{model_name}:latest" in available:
-        return
-
-    stage("Pulling Ollama model", model_name)
-    try:
-        ollama.pull(model_name)
-        stage("Model ready", model_name)
-    except Exception as e:
-        warning(f"Failed to pull model {model_name}: {e}")
+    return OpenAI(
+        base_url=config.api_base or None,
+        api_key=config.api_key or None,
+    )
 
 
 def complete(
     messages: list[dict[str, str]],
     config: LLMConfig,
+    json_schema: dict | None = None,
+    expected_count: int = 0,
     **kwargs: object,
 ) -> str:
-    """Send a chat completion request via LiteLLM.
+    """Send a chat completion request via the OpenAI SDK.
 
-    Auto-pulls Ollama models if not available locally.
+    Works with any OpenAI-compatible endpoint (Ollama, Groq, DeepSeek,
+    OpenRouter, OpenAI).  Set ``api_base`` and ``api_key`` in config.
 
-    Args:
-        messages: Chat messages in OpenAI format.
-        config: LLM configuration.
-        **kwargs: Additional kwargs passed to litellm.completion.
+    When *json_schema* is provided, uses strict JSON schema output.
+    Falls back to ``{"type": "json_object"}`` if the model doesn't
+    support it.
 
-    Returns:
-        The assistant's response text.
+    When *expected_count* > 0, validates the response contains exactly
+    that many items, and retries once on mismatch.
     """
-    try:
-        import litellm
-        from litellm import completion
-    except ImportError:
-        raise ImportError("LiteLLM is not installed. Install with: uv sync --extra llm")
+    _ensure_ollama_model(config.api_base, config.model)
 
-    litellm.drop_params = True  # silently drop unsupported params per provider
-    ensure_ollama_model(config.model)
+    client = _make_client(config)
 
-    call_kwargs: dict = {
+    params: dict = {
         "model": config.model,
         "messages": messages,
         "temperature": config.temperature,
-        "timeout": config.timeout,
-        "num_retries": config.num_retries,
+        "max_tokens": config.max_tokens,
         **kwargs,
     }
-    if _extract_ollama_model(config.model) is not None:
-        if config.api_base:
-            call_kwargs["api_base"] = config.api_base
-        # Disable thinking mode for reasoning models (qwen3.5, etc.)
-        # Thinking consumes the token budget and leaves content empty
-        call_kwargs.setdefault("extra_body", {})["think"] = False
-        # No max_tokens for local models — no cost concern, use full context window
-    else:
-        call_kwargs["max_tokens"] = config.max_tokens
 
-    response = completion(**call_kwargs)
+    if json_schema:
+        try:
+            params["response_format"] = json_schema
+        except Exception:
+            params["response_format"] = {"type": "json_object"}
+
+    response = client.chat.completions.create(**params)
 
     if not response.choices:
         raise RuntimeError("LLM returned empty response (no choices)")
@@ -106,35 +93,91 @@ def complete(
     if not content:
         raise RuntimeError("LLM returned empty content")
 
-    # Strip thinking traces from reasoning models (e.g. qwen3.5)
-    # Some Ollama/LiteLLM versions ignore think=False and include <think> tags in content
+    # Strip thinking traces from reasoning models
     if "<think>" in content:
-        import re
-
         content = re.sub(r"<think>.*?</think>\s*", "", content, flags=re.DOTALL).strip()
         if not content:
             raise RuntimeError("LLM response contained only thinking trace, no content")
 
+    if expected_count > 0:
+        content = _validate_item_count(content, expected_count, messages, config)
+
     return content
 
 
-def unload_ollama_model(model_id: str) -> None:
-    """Unload an Ollama model from GPU memory immediately.
+def _validate_item_count(
+    content: str,
+    expected_count: int,
+    messages: list[dict[str, str]],
+    config: LLMConfig,
+) -> str:
+    """Validate that the LLM response contains exactly expected_count items."""
+    try:
+        data = _try_parse_json(content)
+    except (ValueError, json.JSONDecodeError):
+        return content
 
-    Sends a generate request with keep_alive=0, which tells Ollama
-    to unload the model right away instead of keeping it for 5 minutes.
-    No-op if the model is not an Ollama model.
-    """
-    model_name = _extract_ollama_model(model_id)
-    if model_name is None:
-        return
+    if not isinstance(data, dict):
+        return content
+
+    actual_count = _count_items(data)
+    if actual_count == expected_count:
+        return content
+
+    warning(
+        f"Item count mismatch ({actual_count} vs {expected_count} expected), "
+        f"requesting correction..."
+    )
+
+    reask_msg = (
+        f"You returned {actual_count} items but I need exactly "
+        f"{expected_count}. Return the correct number of items "
+        f"and nothing else. No explanations, no apologies."
+    )
+    retry_messages = messages + [
+        {"role": "assistant", "content": content},
+        {"role": "user", "content": reask_msg},
+    ]
 
     try:
-        import ollama
-    except ImportError:
-        return
-
-    try:
-        ollama.generate(model=model_name, keep_alive=0)
+        client = _make_client(config)
+        response2 = client.chat.completions.create(
+            model=config.model,
+            messages=retry_messages,
+            temperature=0.0,
+            max_tokens=config.max_tokens,
+        )
+        corrected = response2.choices[0].message.content
+        if corrected:
+            data2 = _try_parse_json(corrected)
+            if isinstance(data2, dict) and _count_items(data2) == expected_count:
+                return corrected
     except Exception:
         pass
+
+    raise RuntimeError(f"LLM failed to return exactly {expected_count} items after correction.")
+
+
+def _try_parse_json(text: str) -> dict | list | None:
+    """Try to parse JSON, stripping markdown fences if present."""
+    t = text.strip()
+    if t.startswith("```"):
+        lines = t.splitlines()
+        lines = [line for line in lines[1:] if not line.strip().startswith("```")]
+        t = "\n".join(lines)
+    return json.loads(t)
+
+
+def _count_items(data: dict) -> int:
+    """Count items in a JSON response, supporting both array and keyed formats."""
+    for key in ("translations", "refined", "translated", "results", "items"):
+        if key in data and isinstance(data[key], list):
+            return len(data[key])
+    numeric = 0
+    for k in data:
+        try:
+            int(k)
+            numeric += 1
+        except (ValueError, TypeError):
+            pass
+    return numeric

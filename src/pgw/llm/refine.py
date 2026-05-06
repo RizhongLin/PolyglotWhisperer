@@ -15,6 +15,7 @@ from pgw.llm.client import complete
 from pgw.llm.prompts import (
     REFINE_SYSTEM,
     REFINE_USER,
+    build_refine_schema,
     filter_empty_segments,
     format_json_segments,
     parse_json_response,
@@ -69,7 +70,12 @@ def _process_chunk(
         },
     ]
 
-    response = complete(messages, config, response_format={"type": "json_object"})
+    response = complete(
+        messages,
+        config,
+        json_schema=build_refine_schema(len(texts)),
+        expected_count=len(texts),
+    )
     refined_texts, exact_match = parse_response(response, len(texts))
 
     if exact_match or len(texts) <= 2:
@@ -84,14 +90,19 @@ def _process_chunk(
         )
         reask_msg = (
             f"You returned {parsed_count} items but I need exactly "
-            f"{len(texts)}. Return a JSON object with keys "
-            f'"1" through "{len(texts)}".'
+            f"{len(texts)}. Return a JSON object with a "
+            f'"refined" array of exactly {len(texts)} items.'
         )
         retry_messages = messages + [
             {"role": "assistant", "content": response},
             {"role": "user", "content": reask_msg},
         ]
-        response2 = complete(retry_messages, config, response_format={"type": "json_object"})
+        response2 = complete(
+            retry_messages,
+            config,
+            json_schema=build_refine_schema(len(texts)),
+            expected_count=len(texts),
+        )
         refined_texts2, exact_match2 = parse_response(response2, len(texts))
         if exact_match2:
             return refined_texts2

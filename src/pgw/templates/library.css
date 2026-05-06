@@ -291,3 +291,15 @@ footer em {
   width: 0.75rem;
   height: 0.75rem;
 }
+
+/* Difficulty chip on library cards */
+.difficulty-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.5rem;
+  border-radius: 2rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #fff;
+  letter-spacing: 0.02em;
+}

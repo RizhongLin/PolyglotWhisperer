@@ -57,7 +57,7 @@ def transcribe(
     ] = False,
     llm_model: Annotated[
         Optional[str],
-        typer.Option("--llm-model", help="LLM model for refinement (e.g. ollama_chat/qwen3:8b)."),
+        typer.Option("--llm-model", help="LLM model for refinement (e.g. qwen3:8b)."),
     ] = None,
     llm_backend: Annotated[
         Optional[str],

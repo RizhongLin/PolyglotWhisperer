@@ -28,6 +28,8 @@ COPY --from=builder /app/src /app/src
 COPY --from=builder /app/pyproject.toml /app/pyproject.toml
 
 ENV PATH="/app/.venv/bin:$PATH"
+ENV PGW_SERVE_HOST=0.0.0.0
+# load_dotenv() reads .env from CWD (/data), so mount with -v "$PWD:/data"
 RUN python -m pip install --upgrade pip --quiet
 
 WORKDIR /data

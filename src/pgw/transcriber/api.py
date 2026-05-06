@@ -1,8 +1,7 @@
-"""API transcription backend via LiteLLM.
+"""API transcription backend — OpenAI-compatible Whisper endpoints.
 
-Uses litellm.transcription() to call cloud Whisper APIs (OpenAI, Groq, etc.)
-and regroups word-level timestamps into subtitle segments — no stable-ts
-dependency required.
+Calls any OpenAI SDK-compatible Whisper API (Groq, OpenAI, custom servers)
+directly via the OpenAI Python client.
 """
 
 from __future__ import annotations
@@ -39,45 +38,39 @@ def transcribe(
     workspace_dir: Path | None = None,
     content_hash: str | None = None,
 ) -> list[SubtitleSegment]:
-    """Transcribe audio via a cloud Whisper API.
+    """Transcribe audio via a cloud Whisper API (OpenAI-compatible).
+
+    Set ``api_base`` and ``api_key`` in WhisperConfig for your provider.
+    The model name is passed directly to the API.
 
     Args:
         audio_path: Path to audio file (WAV recommended).
-        config: Whisper configuration with model set to a LiteLLM model string.
+        config: Whisper configuration.
         workspace_dir: Base workspace directory for shared cache.
 
     Returns:
         List of subtitle segments with timestamps.
-
-    Raises:
-        ImportError: If litellm is not installed.
-        ValueError: If file exceeds 25 MB API limit.
     """
     try:
-        import litellm
+        from openai import OpenAI
     except ImportError:
-        raise ImportError("litellm is not installed. Install with: uv sync --extra llm")
+        raise ImportError("openai is not installed. Install with: uv sync --extra llm")
 
     audio_path = Path(audio_path)
     file_size = audio_path.stat().st_size
     if file_size > _MAX_FILE_SIZE:
         audio_path = _compress_for_api(audio_path, workspace_dir, content_hash=content_hash)
 
-    # Drop unsupported top-level params; pass timestamp_granularities via
-    # extra_body so it reaches providers that support it (e.g. Groq, OpenAI)
-    litellm.drop_params = True
-
-    call_kwargs: dict = {
-        "model": config.model,
-        "response_format": "verbose_json",
-        "language": config.language,
-        "extra_body": {"timestamp_granularities": ["word"]},
-    }
-    if config.api_base:
-        call_kwargs["api_base"] = config.api_base
+    client = OpenAI(base_url=config.api_base or None, api_key=config.api_key or None)
 
     with open(audio_path, "rb") as f:
-        response = litellm.transcription(file=f, **call_kwargs)
+        response = client.audio.transcriptions.create(
+            model=config.model,
+            file=f,
+            language=config.language,
+            response_format="verbose_json",
+            timestamp_granularities=["word"],
+        )
 
     return response_to_segments(response)
 

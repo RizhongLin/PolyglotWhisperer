@@ -300,7 +300,7 @@ def _build_download_rows(
     return "\n        ".join(rows) if rows else "<li>No files available</li>"
 
 
-_CEFR_COLORS = {
+_DIFFICULTY_COLORS = {
     "A1": "#2e7d32",
     "A2": "#558b2f",
     "B1": "#f57f17",
@@ -309,7 +309,7 @@ _CEFR_COLORS = {
     "C2": "#6a1b9a",
 }
 
-_CEFR_ORDER = ["A1", "A2", "B1", "B2", "C1", "C2"]
+_DIFFICULTY_ORDER = ["A1", "A2", "B1", "B2", "C1", "C2"]
 
 
 def _build_vocab_section(workspace: Path) -> str:
@@ -323,29 +323,29 @@ def _build_vocab_section(workspace: Path) -> str:
     except (json.JSONDecodeError, OSError):
         return ""
 
-    dist = summary.get("cefr_distribution", {})
+    dist = summary.get("difficulty_distribution", {})
     total_types = sum(dist.values()) or 1
-    estimated = summary.get("estimated_level", "?")
+    estimated = summary.get("estimated_difficulty", "?")
     unique = summary.get("unique_lemmas", 0)
 
     bar_parts = []
-    for level in _CEFR_ORDER:
+    for level in _DIFFICULTY_ORDER:
         count = dist.get(level, 0)
         if count == 0:
             continue
         pct = count / total_types * 100
-        color = _CEFR_COLORS[level]
+        color = _DIFFICULTY_COLORS[level]
         bar_parts.append(
             f'<span style="width:{pct:.1f}%;background:{color}" '
             f'title="{level}: {count}"></span>'
         )
 
     legend_parts = []
-    for level in _CEFR_ORDER:
+    for level in _DIFFICULTY_ORDER:
         count = dist.get(level, 0)
         if count == 0:
             continue
-        color = _CEFR_COLORS[level]
+        color = _DIFFICULTY_COLORS[level]
         legend_parts.append(
             f'<span class="vocab-chip">'
             f'<span style="background:{color}" class="vocab-dot"></span>'
@@ -355,15 +355,15 @@ def _build_vocab_section(workspace: Path) -> str:
     words = summary.get("top_rare_words", [])[:10]
     word_rows = []
     for w in words:
-        cefr = w.get("cefr", "")
-        color = _CEFR_COLORS.get(cefr, "#888")
+        diff = w.get("difficulty", "")
+        color = _DIFFICULTY_COLORS.get(diff, "#888")
         ctx = html.escape(w.get("context", ""))
         trans = html.escape(w.get("translation", ""))
         word_rows.append(
             f"<tr>"
             f'<td class="vocab-word">{html.escape(w["word"])}</td>'
             f'<td><span class="vocab-badge" '
-            f'style="background:{color}">{cefr}</span></td>'
+            f'style="background:{color}">{diff}</span></td>'
             f'<td class="vocab-ctx">{ctx}</td>'
             f'<td class="vocab-trans">{trans}</td>'
             f"</tr>"
@@ -385,8 +385,8 @@ def _build_vocab_section(workspace: Path) -> str:
         '<div class="vocab-stats">'
         f'<span class="vocab-stat">'
         f"<strong>{unique:,}</strong> unique lemmas</span>"
-        f'<span class="vocab-stat">Estimated '
-        f'<strong style="color:{_CEFR_COLORS.get(estimated, "#888")}">'
+        f'<span class="vocab-stat">Difficulty '
+        f'<strong style="color:{_DIFFICULTY_COLORS.get(estimated, "#888")}">'
         f"{estimated}</strong></span>"
         "</div>"
         f'<div class="vocab-bar">{"".join(bar_parts)}</div>'
@@ -578,6 +578,17 @@ def _discover_workspaces(base_dir: Path, backfill_metadata: bool = True) -> list
                 needs_backfill.append(ts_dir)
             lang = meta.get("language", "")
             target = meta.get("target_language", "")
+
+            # Peek at vocabulary file for difficulty estimate
+            difficulty = ""
+            for vocab_file in sorted(ts_dir.glob(GLOB_VOCABULARY_JSON)):
+                try:
+                    vdata = json.loads(vocab_file.read_text(encoding="utf-8"))
+                    difficulty = vdata.get("estimated_difficulty", "")
+                except (json.JSONDecodeError, OSError):
+                    pass
+                break
+
             workspaces.append(
                 {
                     "path": ts_dir,
@@ -592,6 +603,7 @@ def _discover_workspaces(base_dir: Path, backfill_metadata: bool = True) -> list
                     "upload_date": meta.get("upload_date", ""),
                     "uploader": meta.get("uploader", ""),
                     "thumbnail": meta.get("thumbnail", ""),
+                    "difficulty": difficulty,
                 }
             )
 
@@ -648,6 +660,14 @@ def _build_library_html(workspaces: list[dict]) -> str:
                 if lang_labels:
                     joined = " · ".join(lang_labels)
                     meta_chips.append(f'<span><i data-lucide="languages"></i>{joined}</span>')
+
+            difficulty = ws.get("difficulty", "")
+            if difficulty:
+                color = _DIFFICULTY_COLORS.get(difficulty, "#888")
+                meta_chips.append(
+                    f'<span class="difficulty-chip" style="background:{color}">'
+                    f"{html.escape(difficulty)}</span>"
+                )
 
             uploader = ws.get("uploader", "")
             if uploader:

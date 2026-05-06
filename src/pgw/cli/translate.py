@@ -27,7 +27,7 @@ def translate(
     ] = "fr",
     llm_model: Annotated[
         Optional[str],
-        typer.Option("--llm-model", help="LLM model (e.g. ollama_chat/qwen3:8b)."),
+        typer.Option("--llm-model", help="LLM model (e.g. qwen3:8b)."),
     ] = None,
     llm_backend: Annotated[
         Optional[str],

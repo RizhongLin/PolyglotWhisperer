@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 
 from pgw import __version__
 from pgw.cli.clean import clean
+from pgw.cli.export import export
 from pgw.cli.languages import languages
 from pgw.cli.play import play
 from pgw.cli.run import run
@@ -50,8 +51,6 @@ def main(
     ] = False,
 ) -> None:
     """PolyglotWhisperer — Video transcription & translation for language learners."""
-    # Load .env file for API keys (GROQ_API_KEY, OPENAI_API_KEY, etc.)
-    # Does not override existing env vars — shell exports take precedence
     load_dotenv(override=False)
 
     from pgw.utils.logging import set_quiet, set_verbose, setup_logging
@@ -71,3 +70,4 @@ app.command("serve")(serve)
 app.command("languages")(languages)
 app.command("vocab")(vocab)
 app.command("clean")(clean)
+app.command("export")(export)

@@ -21,6 +21,9 @@ def vocab(
     workspace: Path = typer.Argument(..., help="Workspace directory to analyze."),
     language: str | None = typer.Option(None, "-l", "--language", help="Override language code."),
     top: int = typer.Option(30, "--top", help="Number of rare words to show."),
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Regenerate even if cached vocabulary JSON exists."
+    ),
 ) -> None:
     """Show vocabulary summary for a processed workspace."""
     workspace = Path(workspace)
@@ -28,12 +31,12 @@ def vocab(
         error(f"Not a directory: {workspace}")
         raise typer.Exit(1)
 
-    # Try loading existing summary
-    summary = _load_existing_summary(workspace, language)
-
-    if summary is None:
-        # Generate from subtitle files
+    if force:
         summary = _generate_from_workspace(workspace, language, top)
+    else:
+        summary = _load_existing_summary(workspace, language)
+        if summary is None:
+            summary = _generate_from_workspace(workspace, language, top)
 
     if summary is None:
         error("No subtitle files found in workspace.")
@@ -103,12 +106,12 @@ def _display_summary(summary: dict, top: int) -> None:
     console.print(f"[bold]Total words:[/bold] {summary['total_words']:,}")
     console.print(f"[bold]Unique words:[/bold] {summary['unique_words']:,}")
     console.print(f"[bold]Unique lemmas:[/bold] {summary['unique_lemmas']:,}")
-    console.print(f"[bold]Estimated level:[/bold] {summary['estimated_level']}")
+    console.print(f"[bold]Estimated difficulty:[/bold] {summary['estimated_difficulty']}")
 
-    # CEFR distribution
+    # Difficulty distribution
     console.print()
-    dist = summary["cefr_distribution"]
-    dist_table = Table(title="CEFR Distribution")
+    dist = summary["difficulty_distribution"]
+    dist_table = Table(title="Difficulty Distribution")
     for level in ["A1", "A2", "B1", "B2", "C1", "C2"]:
         dist_table.add_column(level, justify="right")
     dist_table.add_row(*[str(dist.get(level, 0)) for level in ["A1", "A2", "B1", "B2", "C1", "C2"]])
@@ -122,7 +125,7 @@ def _display_summary(summary: dict, top: int) -> None:
         word_table.add_column("Word", style="bold")
         word_table.add_column("Lemma")
         word_table.add_column("POS")
-        word_table.add_column("CEFR")
+        word_table.add_column("Difficulty")
         word_table.add_column("Zipf", justify="right")
         word_table.add_column("#", justify="right")
         word_table.add_column("Context", max_width=40, no_wrap=True)
@@ -133,7 +136,7 @@ def _display_summary(summary: dict, top: int) -> None:
                 w["word"],
                 w["lemma"],
                 w["pos"],
-                w["cefr"],
+                w["difficulty"],
                 str(w["zipf"]),
                 str(w["count"]),
                 w.get("context", "")[:40],

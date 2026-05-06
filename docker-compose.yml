@@ -4,10 +4,15 @@ services:
     image: pgw:latest
     stdin_open: true
     tty: true
+    ports:
+      - "8321:8321"
     volumes:
       - .:/data
+      # Development mode: mount source for live reload (no rebuild needed)
+      # - ./src:/app/src
     environment:
       - PGW_WORKSPACE_DIR=/data/pgw_workspace
+      - PGW_SERVE_HOST=0.0.0.0
       # API keys — set in .env or pass directly:
       # - GROQ_API_KEY=${GROQ_API_KEY}
       # - OPENAI_API_KEY=${OPENAI_API_KEY}

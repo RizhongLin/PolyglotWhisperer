@@ -1,8 +1,8 @@
-"""Tests for vocabulary summary CEFR estimation."""
+"""Tests for vocabulary summary difficulty estimation."""
 
 import pytest
 
-from pgw.vocab.summary import zipf_to_cefr
+from pgw.vocab.summary import zipf_to_difficulty
 
 
 @pytest.mark.parametrize(
@@ -10,7 +10,7 @@ from pgw.vocab.summary import zipf_to_cefr
     [
         (7.0, "A1"),
         (5.1, "A1"),
-        (5.0, "A2"),  # boundary: > 5.0, not >=
+        (5.0, "A2"),
         (4.1, "A2"),
         (4.0, "B1"),
         (3.5, "B1"),
@@ -18,7 +18,7 @@ from pgw.vocab.summary import zipf_to_cefr
         (2.5, "B2"),
         (2.0, "C1"),
         (1.5, "C1"),
-        (1.0, "C2"),  # boundary: > 1.0, not >=
+        (1.0, "C2"),
         (0.5, "C2"),
         (0.0, "C2"),
         (-1.0, "C2"),
@@ -42,5 +42,5 @@ from pgw.vocab.summary import zipf_to_cefr
         "very-negative→C2",
     ],
 )
-def test_zipf_to_cefr(zipf, expected):
-    assert zipf_to_cefr(zipf) == expected
+def test_zipf_to_difficulty(zipf, expected):
+    assert zipf_to_difficulty(zipf) == expected

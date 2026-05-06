@@ -28,6 +28,8 @@ class BackendConfig(BaseModel):
     backend: str = "local"  # "local" or "api"
     local_model: str = ""
     api_model: str = ""
+    api_base: str = ""  # Custom API endpoint (OpenAI-compatible server, etc.)
+    api_key: str = ""  # API key for the custom endpoint (env vars preferred)
 
     @property
     def model(self) -> str:
@@ -37,17 +39,17 @@ class BackendConfig(BaseModel):
 
 class WhisperConfig(BackendConfig):
     local_model: str = "large-v3-turbo"
-    api_model: str = "groq/whisper-large-v3-turbo"
-    api_base: str | None = None  # Custom API endpoint (e.g. self-hosted Whisper)
+    api_model: str = "whisper-large-v3-turbo"
+    api_base: str = ""
     language: str = "fr"
     device: str = "auto"
     word_timestamps: bool = True
 
 
 class LLMConfig(BackendConfig):
-    local_model: str = "ollama_chat/qwen3:8b"
-    api_model: str = "openrouter/openai/gpt-oss-120b"
-    api_base: str = "http://localhost:11434"
+    local_model: str = "qwen3:8b"
+    api_model: str = "deepseek-chat"
+    api_base: str = "http://localhost:11434/v1"
     temperature: float = 0.3
     max_tokens: int = 16384
     timeout: int = 600

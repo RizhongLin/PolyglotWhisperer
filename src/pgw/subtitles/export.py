@@ -382,9 +382,9 @@ def export_parallel_epub(
 
 # ── Vocabulary export ──
 
-_CEFR_ORDER = ["A1", "A2", "B1", "B2", "C1", "C2"]
+_DIFFICULTY_ORDER = ["A1", "A2", "B1", "B2", "C1", "C2"]
 
-_CEFR_COLORS = {
+_DIFFICULTY_COLORS = {
     "A1": "#2e7d32",
     "A2": "#558b2f",
     "B1": "#f57f17",
@@ -464,7 +464,7 @@ body {
   color: #888;
 }
 
-.cefr-bar {
+.difficulty-bar {
   display: flex;
   height: 10px;
   border-radius: 5px;
@@ -472,12 +472,12 @@ body {
   margin-bottom: 0.4em;
 }
 
-.cefr-bar span {
+.difficulty-bar span {
   display: inline-block;
   height: 100%;
 }
 
-.cefr-legend {
+.difficulty-legend {
   display: flex;
   gap: 1em;
   font-size: 7.5pt;
@@ -485,7 +485,7 @@ body {
   margin-bottom: 2em;
 }
 
-.cefr-legend .dot {
+.difficulty-legend .dot {
   display: inline-block;
   width: 8px;
   height: 8px;
@@ -644,11 +644,11 @@ td.translation {
 """
 
 
-def _group_words_by_cefr(words: list[dict]) -> dict[str, list[dict]]:
-    """Group word entries by CEFR level, preserving only non-empty levels."""
+def _group_words_by_difficulty(words: list[dict]) -> dict[str, list[dict]]:
+    """Group word entries by difficulty tier, preserving only non-empty levels."""
     groups: dict[str, list[dict]] = {}
     for w in words:
-        level = w.get("cefr", "C2")
+        level = w.get("difficulty", "C2")
         groups.setdefault(level, []).append(w)
     return groups
 
@@ -677,19 +677,19 @@ def build_vocab_html(summary: dict, title: str = "", css: str = "") -> str:
 
     total = summary.get("total_words", 0)
     unique = summary.get("unique_lemmas", 0)
-    estimated = summary.get("estimated_level", "?")
-    dist = summary.get("cefr_distribution", {})
+    estimated = summary.get("estimated_difficulty", "?")
+    dist = summary.get("difficulty_distribution", {})
     total_types = sum(dist.values()) or 1
 
-    # CEFR bar segments
+    # Difficulty bar segments
     bar_parts = []
     legend_parts = []
-    for level in _CEFR_ORDER:
+    for level in _DIFFICULTY_ORDER:
         count = dist.get(level, 0)
         if count == 0:
             continue
         pct = count / total_types * 100
-        color = _CEFR_COLORS[level]
+        color = _DIFFICULTY_COLORS[level]
         bar_parts.append(f'<span style="width:{pct:.1f}%;background:{color}"></span>')
         legend_parts.append(
             f'<span><span class="dot" style="background:{color}"></span>'
@@ -699,15 +699,15 @@ def build_vocab_html(summary: dict, title: str = "", css: str = "") -> str:
     bar_html = "".join(bar_parts)
     legend_html = "".join(legend_parts)
 
-    # Word tables grouped by CEFR level (rarest first: C2, C1, ...)
+    # Word tables grouped by difficulty (rarest first: C2, C1, ...)
     words = summary.get("top_rare_words", [])
-    groups = _group_words_by_cefr(words)
+    groups = _group_words_by_difficulty(words)
     tables_html = []
-    for level in reversed(_CEFR_ORDER):
+    for level in reversed(_DIFFICULTY_ORDER):
         group = groups.get(level)
         if not group:
             continue
-        color = _CEFR_COLORS[level]
+        color = _DIFFICULTY_COLORS[level]
         rows = "\n".join(_build_vocab_word_row(w) for w in group)
         tables_html.append(
             f'<h2 class="level-heading">'
@@ -753,8 +753,8 @@ def build_vocab_html(summary: dict, title: str = "", css: str = "") -> str:
 <div class="stats-grid">
   {stats}
 </div>
-<div class="cefr-bar">{bar_html}</div>
-<div class="cefr-legend">{legend_html}</div>
+<div class="difficulty-bar">{bar_html}</div>
+<div class="difficulty-legend">{legend_html}</div>
 {"".join(tables_html)}
 </body>
 </html>"""
@@ -799,7 +799,7 @@ def export_vocab_epub(
 
     total = summary.get("total_words", 0)
     unique = summary.get("unique_lemmas", 0)
-    estimated = summary.get("estimated_level", "?")
+    estimated = summary.get("estimated_difficulty", "?")
 
     book = epub.EpubBook()
     content_hash = hashlib.sha256(
@@ -834,16 +834,16 @@ def export_vocab_epub(
     title_page.add_item(style)
     book.add_item(title_page)
 
-    # One chapter per CEFR level (rarest first)
+    # One chapter per difficulty tier (rarest first)
     words = summary.get("top_rare_words", [])
-    groups = _group_words_by_cefr(words)
+    groups = _group_words_by_difficulty(words)
     chapters = []
-    for level in reversed(_CEFR_ORDER):
+    for level in reversed(_DIFFICULTY_ORDER):
         group = groups.get(level)
         if not group:
             continue
 
-        color = _CEFR_COLORS[level]
+        color = _DIFFICULTY_COLORS[level]
         rows = "\n".join(_build_vocab_word_row(w) for w in group)
 
         chapter = epub.EpubHtml(

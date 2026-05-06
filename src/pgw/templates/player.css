@@ -776,3 +776,44 @@ footer em {
   width: 0.75rem;
   height: 0.75rem;
 }
+
+/* Vocabulary popover on transcript word click */
+.vocab-popover {
+  position: fixed;
+  z-index: 999;
+  min-width: 200px;
+  max-width: 280px;
+  padding: 0.6rem 0.75rem;
+  border-radius: 8px;
+  background: var(--pico-card-background-color);
+  border: 1px solid var(--pico-muted-border-color);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  font-size: 0.85rem;
+  line-height: 1.4;
+  pointer-events: none;
+}
+.vp-word {
+  font-weight: 600;
+  font-size: 1.05rem;
+  margin-bottom: 0.3rem;
+}
+.vp-diff {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 2rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #fff;
+  margin-bottom: 0.4rem;
+}
+.vp-trans {
+  color: var(--pico-color);
+  opacity: 0.75;
+  font-style: italic;
+  margin-top: 0.25rem;
+}
+.vp-ctx {
+  color: var(--pico-muted-color);
+  font-size: 0.78rem;
+  margin-top: 0.25rem;
+}

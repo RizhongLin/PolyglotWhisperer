@@ -72,9 +72,9 @@ def test_build_config_overrides_llm_model_api():
 
 def test_build_config_overrides_llm_model_local():
     overrides = build_config_overrides(
-        language="en", device="cpu", llm_model="ollama/qwen", llm_backend=None
+        language="en", device="cpu", llm_model="qwen3:8b", llm_backend=None
     )
-    assert overrides["llm.local_model"] == "ollama/qwen"
+    assert overrides["llm.local_model"] == "qwen3:8b"
 
 
 def test_build_config_overrides_backend():

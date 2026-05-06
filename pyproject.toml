@@ -25,8 +25,7 @@ download = [
     "yt-dlp>=2025.1",
 ]
 llm = [
-    "litellm>=1.40",
-    "ollama>=0.4",
+    "openai>=1.0",
     "tenacity>=8.0",
 ]
 nlp = [

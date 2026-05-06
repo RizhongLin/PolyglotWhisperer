@@ -374,7 +374,8 @@ def run_pipeline(
         saved.append(summary_path)
         stage(
             "Vocabulary",
-            f"{summary['unique_lemmas']} unique lemmas, estimated {summary['estimated_level']}",
+            f"{summary['unique_lemmas']} unique lemmas, "
+            f"difficulty {summary['estimated_difficulty']}",
         )
 
         # Vocabulary PDF/EPUB export (best-effort)
@@ -406,10 +407,19 @@ def run_pipeline(
     emit("vocab", 1.0, "Vocabulary summary done")
 
     # Unload Ollama model from GPU only if LLM was actually used
-    if llm_was_used:
-        from pgw.llm.client import unload_ollama_model
+    if llm_was_used and config.llm.api_base and "11434" in config.llm.api_base:
+        import subprocess
 
-        unload_ollama_model(config.llm.model)
+        try:
+            subprocess.run(
+                ["curl", "-s", "-X", "DELETE",
+                 "http://localhost:11434/api/generate",
+                 "-d", f'{{"model":"{config.llm.model}","keep_alive":0}}'],
+                capture_output=True,
+                timeout=5,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
 
     # Step 6: Save metadata
     emit("save", 0.0, "Saving metadata...")
