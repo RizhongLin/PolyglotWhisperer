@@ -40,11 +40,27 @@ def main(
             help="Show version and exit.",
         ),
     ] = None,
+    verbose: Annotated[
+        bool,
+        typer.Option("--verbose", "-v", help="Enable debug output."),
+    ] = False,
+    quiet: Annotated[
+        bool,
+        typer.Option("--quiet", "-q", help="Suppress non-error output."),
+    ] = False,
 ) -> None:
     """PolyglotWhisperer — Video transcription & translation for language learners."""
     # Load .env file for API keys (GROQ_API_KEY, OPENAI_API_KEY, etc.)
     # Does not override existing env vars — shell exports take precedence
     load_dotenv(override=False)
+
+    from pgw.utils.logging import set_quiet, set_verbose, setup_logging
+
+    setup_logging()
+    if verbose:
+        set_verbose(True)
+    if quiet:
+        set_quiet(True)
 
 
 app.command("run")(run)

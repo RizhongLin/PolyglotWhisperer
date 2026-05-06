@@ -17,7 +17,7 @@ import pysubs2
 
 from pgw.core.models import SubtitleSegment
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("pgw.subtitles")
 
 # VTT line positioning for bilingual subtitles (percentage from top)
 _BILINGUAL_ORIGINAL_LINE = 85  # Original text at bottom

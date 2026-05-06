@@ -1,0 +1,12 @@
+.venv
+__pycache__
+*.pyc
+*.egg-info
+.git
+.gitignore
+pgw_workspace
+downloads
+.env
+*.wav
+.claude
+CLAUDE.md

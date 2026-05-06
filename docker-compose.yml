@@ -1,0 +1,15 @@
+services:
+  pgw:
+    build: .
+    image: pgw:latest
+    stdin_open: true
+    tty: true
+    volumes:
+      - .:/data
+    environment:
+      - PGW_WORKSPACE_DIR=/data/pgw_workspace
+      # API keys — set in .env or pass directly:
+      # - GROQ_API_KEY=${GROQ_API_KEY}
+      # - OPENAI_API_KEY=${OPENAI_API_KEY}
+    entrypoint: pgw
+    command: --help

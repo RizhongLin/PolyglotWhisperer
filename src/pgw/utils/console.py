@@ -1,7 +1,12 @@
-"""Shared Rich console instance and progress/output utilities."""
+"""Shared Rich console instance and progress/output utilities.
+
+All output functions route through the pgw logging system so messages
+appear in the terminal AND in any configured log file.
+"""
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
@@ -9,6 +14,8 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 console = Console()
+
+_LOGGER = logging.getLogger("pgw")
 
 
 def chunk_progress() -> Progress:
@@ -24,44 +31,43 @@ def chunk_progress() -> Progress:
 def stage(name: str, detail: str = "") -> None:
     """Print a pipeline stage header: bold name, dim detail."""
     if detail:
-        console.print(f"[bold]{name}[/bold]  [dim]{detail}[/dim]")
+        _LOGGER.info("[bold]%s[/bold]  [dim]%s[/dim]", name, detail)
     else:
-        console.print(f"[bold]{name}[/bold]")
+        _LOGGER.info("[bold]%s[/bold]", name)
 
 
 def cache_hit(message: str = "Using cache") -> None:
     """Print an indented dim cache-hit message."""
-    console.print(f"  [dim]{message}[/dim]")
+    _LOGGER.info("  [dim]%s[/dim]", message)
 
 
 def error(message: str) -> None:
     """Print an error message in red."""
-    console.print(f"[red]{message}[/red]")
+    _LOGGER.error("[red]%s[/red]", message)
 
 
 def warning(message: str) -> None:
     """Print a warning message in yellow."""
-    console.print(f"[yellow]{message}[/yellow]")
+    _LOGGER.warning("[yellow]%s[/yellow]", message)
 
 
 def saved(*paths: Path | str) -> None:
     """Print green 'Saved' with file path(s)."""
     names = "  ".join(str(p) for p in paths)
-    console.print(f"[green]Saved:[/green] {names}")
+    _LOGGER.info("[green]Saved:[/green] %s", names)
 
 
 def debug(message: str) -> None:
     """Print only when PGW_DEBUG=1."""
     if os.environ.get("PGW_DEBUG"):
-        console.print(f"[dim]{message}[/dim]")
+        _LOGGER.debug("[dim]%s[/dim]", message)
 
 
 def workspace_done(workspace: Path, files: list[Path]) -> None:
     """Print the final Done + Workspace + file listing block."""
     names = [f.name for f in files if f.is_file()]
-    console.print(f"\n[bold green]Done![/bold green] Workspace: {workspace}")
+    _LOGGER.info("\n[bold green]Done![/bold green] Workspace: %s", workspace)
     if names:
-        # Wrap file names at ~80 columns
         lines: list[list[str]] = [[]]
         line_len = 0
         for n in names:
@@ -71,4 +77,4 @@ def workspace_done(workspace: Path, files: list[Path]) -> None:
             lines[-1].append(n)
             line_len += len(n) + 2
         for line in lines:
-            console.print(f"  {('  ').join(line)}")
+            _LOGGER.info("  %s", ("  ").join(line))
