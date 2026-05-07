@@ -1,9 +1,14 @@
 """Tests for LLM prompt parsing edge cases."""
 
+import json
+
 from pgw.llm.prompts import (
     UNTRANSLATED_MARKER,
+    build_refine_schema,
+    build_translation_schema,
     format_bilingual_context,
     format_history_context,
+    format_json_segments,
     parse_json_response,
     parse_numbered_response,
 )
@@ -143,3 +148,44 @@ def test_format_bilingual_context_pairs():
 
 def test_untranslated_marker_constant():
     assert UNTRANSLATED_MARKER.startswith("[?]")
+
+
+# --- Keyed JSON I/O format ---
+
+
+def test_format_json_segments_emits_keyed_dict():
+    """Input format is {"1": ..., "2": ...} so the model has per-item anchors."""
+    rendered = format_json_segments(["Hello", "World"])
+    data = json.loads(rendered)
+    assert data == {"1": "Hello", "2": "World"}
+
+
+def test_format_json_segments_collapses_newlines():
+    rendered = format_json_segments(["line\nbreak"])
+    assert json.loads(rendered) == {"1": "line break"}
+
+
+def test_translation_schema_requires_every_key():
+    """Strict schema enumerates "1" through "N" so every key must appear."""
+    schema = build_translation_schema(3)
+    inner = schema["json_schema"]["schema"]
+    assert schema["json_schema"]["strict"] is True
+    assert inner["required"] == ["1", "2", "3"]
+    assert set(inner["properties"]) == {"1", "2", "3"}
+    assert inner["additionalProperties"] is False
+    assert all(p == {"type": "string"} for p in inner["properties"].values())
+
+
+def test_refine_schema_requires_every_key():
+    schema = build_refine_schema(2)
+    inner = schema["json_schema"]["schema"]
+    assert inner["required"] == ["1", "2"]
+    assert set(inner["properties"]) == {"1", "2"}
+
+
+def test_parse_keyed_response_allows_empty_strings():
+    """Empty string is a valid value — used for noise-only segments."""
+    response = '{"1": "Hello", "2": "", "3": "World"}'
+    result, exact = parse_json_response(response, 3)
+    assert result == ["Hello", "", "World"]
+    assert exact is True

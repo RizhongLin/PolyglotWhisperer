@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from typing import Any
 
 from pgw.core.config import WhisperConfig
 from pgw.core.models import SubtitleSegment
 from pgw.utils.cache import cache_key, find_cached_file, get_cache_dir
-from pgw.utils.console import debug
+from pgw.utils.console import debug, warning
 from pgw.utils.text import (
     BYTES_PER_MB,
     CLAUSE_PUNCT,
@@ -30,6 +31,13 @@ from pgw.utils.text import (
 
 # 25 MB upload limit for Groq/OpenAI Whisper API
 _MAX_FILE_SIZE = 25 * BYTES_PER_MB
+
+# Discovered transcription format support per (api_base, model). Whisper
+# providers diverge: OpenAI/Groq accept verbose_json + word timestamps; some
+# self-hosted servers only support json/text. Discovery happens once per
+# provider+model, then every subsequent call uses the cached tier.
+# Values: "verbose_json+words", "verbose_json", "json".
+_TRANSCRIPTION_TIER: dict[tuple[str, str], str] = {}
 
 
 def transcribe(
@@ -63,16 +71,95 @@ def transcribe(
 
     client = OpenAI(base_url=config.api_base or None, api_key=config.api_key or None)
 
-    with open(audio_path, "rb") as f:
-        response = client.audio.transcriptions.create(
-            model=config.model,
-            file=f,
-            language=config.language,
-            response_format="verbose_json",
-            timestamp_granularities=["word"],
-        )
+    response = _transcribe_with_format_fallback(client, audio_path, config)
 
     return response_to_segments(response)
+
+
+_FORMAT_REJECTION_SUBSTRINGS = (
+    "response_format",
+    "timestamp_granularit",
+    "verbose_json",
+    "unavailable",
+    "not supported",
+    "unsupported",
+)
+
+
+def _is_format_unsupported_error(exc: Exception) -> bool:
+    """True if a 4xx error message indicates the server rejected the format.
+
+    Narrowed by substring match so we don't mask file-too-large, invalid-model,
+    or quota errors that also raise BadRequestError.
+    """
+    try:
+        from openai import BadRequestError
+    except ImportError:  # pragma: no cover - openai always installed when calling
+        return False
+    if not isinstance(exc, BadRequestError):
+        return False
+    msg = str(exc).lower()
+    return any(s in msg for s in _FORMAT_REJECTION_SUBSTRINGS)
+
+
+def _build_attempt(tier: str, file_obj: Any, config: WhisperConfig) -> dict:
+    """Build kwargs for transcriptions.create based on the resolved tier."""
+    params: dict[str, Any] = {
+        "model": config.model,
+        "file": file_obj,
+        "language": config.language,
+    }
+    if tier == "verbose_json+words":
+        params["response_format"] = "verbose_json"
+        params["timestamp_granularities"] = ["word"]
+    elif tier == "verbose_json":
+        params["response_format"] = "verbose_json"
+    else:  # "json"
+        params["response_format"] = "json"
+    return params
+
+
+def _transcribe_with_format_fallback(client: Any, audio_path: Path, config: WhisperConfig) -> Any:
+    """Call audio.transcriptions.create, discovering the best format once.
+
+    Per-(api_base, model) cache. First call tries verbose_json + word
+    timestamps, falls back to verbose_json (segment-only timestamps), then
+    json (single-segment text). The discovered tier is recorded and reused
+    for every subsequent call, so the fallback cost is paid at most once
+    per provider+model.
+    """
+    cache_key_ = (config.api_base or "", config.model)
+    cached = _TRANSCRIPTION_TIER.get(cache_key_)
+
+    if cached is not None:
+        with open(audio_path, "rb") as f:
+            return client.audio.transcriptions.create(**_build_attempt(cached, f, config))
+
+    candidates = ["verbose_json+words", "verbose_json", "json"]
+    last_exc: Exception | None = None
+    for tier in candidates:
+        try:
+            with open(audio_path, "rb") as f:
+                response = client.audio.transcriptions.create(**_build_attempt(tier, f, config))
+        except Exception as exc:
+            if not _is_format_unsupported_error(exc):
+                raise
+            last_exc = exc
+            debug(f"transcription tier {tier!r} rejected by {config.model}: {exc}")
+            continue
+        _TRANSCRIPTION_TIER[cache_key_] = tier
+        if tier != candidates[0]:
+            warning(
+                f"{config.model} does not support {candidates[0]!r}; "
+                f"using {tier!r} for the rest of this run."
+            )
+        return response
+
+    raise (
+        last_exc
+        if last_exc is not None
+        else RuntimeError("All transcription format fallbacks exhausted")
+    )
 
 
 def _compress_for_api(

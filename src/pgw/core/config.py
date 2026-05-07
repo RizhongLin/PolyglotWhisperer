@@ -4,8 +4,15 @@ Layered config loading (lowest to highest priority):
 1. config/default.toml (shipped with package)
 2. ~/.config/pgw/config.toml (user-level)
 3. ./pgw.toml (project-level)
-4. Environment variables (PGW_WHISPER__MODEL_SIZE, etc.)
-5. CLI flags
+4. Environment variables (PGW_WHISPER__MODEL_SIZE, etc.) and .env file
+5. CLI flags (passed as nested dict to PGWConfig)
+
+Each source is a separate ``PydanticBaseSettingsSource`` so pydantic-settings
+deep-merges them field-by-field. This is critical for nested models: e.g.
+``PGW_LLM__API_KEY`` must override ``[llm]`` defaults from TOML even though
+the TOML layer fills in other ``[llm]`` fields. Passing the merged TOML dict
+as a single ``__init__`` kwarg would silently shadow env-var loading for
+every nested field.
 """
 
 from __future__ import annotations
@@ -13,11 +20,15 @@ from __future__ import annotations
 import tomllib
 from importlib.resources import files
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+)
 
-_DEFAULT_CONFIG_TEXT = (files("pgw.config") / "default.toml").read_text()
 _USER_CONFIG = Path.home() / ".config" / "pgw" / "config.toml"
 _PROJECT_CONFIG = Path("pgw.toml")
 
@@ -51,12 +62,16 @@ class LLMConfig(BackendConfig):
     api_model: str = "deepseek-chat"
     api_base: str = "http://localhost:11434/v1"
     temperature: float = 0.3
-    max_tokens: int = 16384
+    max_tokens: int = 32768
     timeout: int = 600
     num_retries: int = 2
     refine_enabled: bool = False
     translation_enabled: bool = True
     target_language: str = "en"
+    # Segments per LLM call. ``None`` lets the caller auto-pick from backend
+    # and (for local) model size. Override via ``--chunk-size`` (CLI),
+    # ``PGW_LLM__CHUNK_SIZE`` (env), or ``[llm] chunk_size = N`` in pgw.toml.
+    chunk_size: int | None = None
 
 
 class DownloadConfig(BaseModel):
@@ -69,10 +84,52 @@ class PlayerConfig(BaseModel):
     sub_font_size: int = 40
 
 
+def _load_toml(path: Path) -> dict[str, Any]:
+    """Load a TOML file if it exists, return empty dict otherwise."""
+    if path.is_file():
+        with open(path, "rb") as f:
+            return tomllib.load(f)
+    return {}
+
+
+def _load_packaged_default() -> dict[str, Any]:
+    """Load the packaged default.toml shipped with the wheel."""
+    return tomllib.loads((files("pgw.config") / "default.toml").read_text())
+
+
+def _flatten_general(data: dict[str, Any]) -> dict[str, Any]:
+    """Promote keys from a [general] section to top-level."""
+    if "general" in data:
+        general = data["general"]
+        merged = {k: v for k, v in data.items() if k != "general"}
+        for key, value in general.items():
+            merged.setdefault(key, value)
+        return merged
+    return data
+
+
+class _TomlSource(PydanticBaseSettingsSource):
+    """Settings source backed by a single TOML dict already loaded in memory."""
+
+    def __init__(self, settings_cls: type[BaseSettings], data: dict[str, Any]) -> None:
+        super().__init__(settings_cls)
+        self._data = _flatten_general(data)
+
+    def get_field_value(self, field: Any, field_name: str) -> tuple[Any, str, bool]:
+        value = self._data.get(field_name)
+        return value, field_name, False
+
+    def __call__(self) -> dict[str, Any]:
+        return self._data
+
+
 class PGWConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="PGW_",
         env_nested_delimiter="__",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
     )
 
     whisper: WhisperConfig = WhisperConfig()
@@ -86,24 +143,40 @@ class PGWConfig(BaseSettings):
         """Download cache directory, under the shared workspace cache."""
         return self.workspace_dir / ".cache" / "downloads"
 
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        # Sources are consulted in order; earlier wins per-field.
+        # Precedence (highest first): CLI kwargs > env > .env > project.toml
+        # > user.toml > packaged default.toml.
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            _TomlSource(settings_cls, _load_toml(_PROJECT_CONFIG)),
+            _TomlSource(settings_cls, _load_toml(_USER_CONFIG)),
+            _TomlSource(settings_cls, _load_packaged_default()),
+        )
 
-def _load_toml(path: Path) -> dict:
-    """Load a TOML file if it exists, return empty dict otherwise."""
-    if path.is_file():
-        with open(path, "rb") as f:
-            return tomllib.load(f)
-    return {}
 
-
-def deep_merge(base: dict, override: dict) -> dict:
-    """Recursively merge override into base."""
-    merged = base.copy()
-    for key, value in override.items():
-        if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
-            merged[key] = deep_merge(merged[key], value)
-        else:
-            merged[key] = value
-    return merged
+def _expand_dot_paths(overrides: dict[str, object]) -> dict[str, Any]:
+    """Convert {'llm.backend': 'api'} → {'llm': {'backend': 'api'}}, dropping None."""
+    nested: dict[str, Any] = {}
+    for key, value in overrides.items():
+        if value is None:
+            continue
+        parts = key.split(".")
+        target = nested
+        for part in parts[:-1]:
+            target = target.setdefault(part, {})
+        target[parts[-1]] = value
+    return nested
 
 
 def load_config(**cli_overrides: object) -> PGWConfig:
@@ -111,28 +184,8 @@ def load_config(**cli_overrides: object) -> PGWConfig:
 
     Args:
         **cli_overrides: Direct overrides from CLI flags. Keys can be
-            dot-separated (e.g. whisper.local_model="medium").
+            dot-separated (e.g. whisper.local_model="medium") to target
+            nested models. ``None`` values are dropped so absent flags do
+            not override env/TOML.
     """
-    # Layer 1-3: TOML files (defaults from packaged TOML, then user/project)
-    config_data: dict = tomllib.loads(_DEFAULT_CONFIG_TEXT)
-    for path in (_USER_CONFIG, _PROJECT_CONFIG):
-        layer = _load_toml(path)
-        config_data = deep_merge(config_data, layer)
-
-    # Flatten 'general' section into top-level
-    if "general" in config_data:
-        general = config_data.pop("general")
-        config_data = deep_merge(config_data, general)
-
-    # Apply CLI overrides (dot-separated keys)
-    for key, value in cli_overrides.items():
-        if value is None:
-            continue
-        parts = key.split(".")
-        target = config_data
-        for part in parts[:-1]:
-            target = target.setdefault(part, {})
-        target[parts[-1]] = value
-
-    # Layer 4: env vars are handled by Pydantic BaseSettings
-    return PGWConfig(**config_data)
+    return PGWConfig(**_expand_dot_paths(cli_overrides))

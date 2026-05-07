@@ -10,7 +10,7 @@ from typing import Callable
 
 from pgw.core.config import LLMConfig
 from pgw.core.models import SubtitleSegment
-from pgw.llm.chunking import find_chunk_boundaries
+from pgw.llm.chunking import find_chunk_boundaries, resolve_chunk_params
 from pgw.llm.client import complete
 from pgw.llm.prompts import (
     REFINE_SYSTEM,
@@ -25,12 +25,36 @@ from pgw.llm.prompts import (
 from pgw.utils.console import chunk_progress, warning
 from pgw.utils.text import find_sentence_split
 
-CHUNK_SIZE = 30
-OVERLAP = 4  # Forward lookahead — refined but discarded, for boundary context
-BACK_OVERLAP = 3  # Backward re-refinement — later chunk overwrites previous tail
+# Cloud/API default — refinement preserves wording closely so it can
+# run with larger chunks than translation, but stays a step below to
+# leave headroom for the 1:1 keyed-JSON constraint.
+API_CHUNK_SIZE = 100
+
+# Local Ollama models lag on long structured output. Cap is reached at
+# ~64B (formula = int(8 * log2(64)) = 48), so any local model larger
+# than that clamps here.
+LOCAL_CHUNK_SIZE_CAP = 48
+
+# Floors for boundary context. These dominate the proportional 8%/5%
+# scaling for chunk_size below ~50.
+MIN_OVERLAP = 4
+MIN_BACK_OVERLAP = 3
+
 HISTORY_SIZE = 4  # Preceding refined lines shown as context
 MAX_RETRY_DEPTH = 3  # Max recursion for binary-split retries
 SCAN_RANGE = 3  # How far to scan for sentence boundaries around ideal split point
+
+
+def _chunk_params(config: LLMConfig, chunk_size: int | None = None) -> tuple[int, int, int]:
+    """Refine wrapper around the shared resolver."""
+    return resolve_chunk_params(
+        config,
+        chunk_size,
+        api_default=API_CHUNK_SIZE,
+        local_cap=LOCAL_CHUNK_SIZE_CAP,
+        min_overlap=MIN_OVERLAP,
+        min_back_overlap=MIN_BACK_OVERLAP,
+    )
 
 
 def parse_response(response: str, expected_count: int) -> tuple[list[str], bool]:
@@ -131,21 +155,19 @@ def refine_subtitles(
     segments: list[SubtitleSegment],
     language: str,
     config: LLMConfig,
-    chunk_size: int = CHUNK_SIZE,
+    chunk_size: int | None = None,
     on_progress: Callable[[float], None] | None = None,
 ) -> list[SubtitleSegment]:
     """Refine subtitle segments using an LLM.
 
-    Uses sentence-boundary-aware chunking with forward/backward overlap:
-    - Forward overlap: OVERLAP segments refined as lookahead but discarded
-    - Backward overlap: BACK_OVERLAP segments re-refined and overwritten,
-      so boundary segments end up mid-window with full context
-    - JSON I/O format for reliable parsing
-    - Preserves all timestamps — only text is modified
+    Uses sentence-boundary-aware chunking with proportional forward/backward
+    overlap (~8% / ~5% of chunk_size). JSON I/O for reliable parsing.
+    Preserves all timestamps — only text is modified.
     """
+    chunk_size, overlap, back_overlap = _chunk_params(config, chunk_size)
     refined: list[SubtitleSegment] = []
 
-    boundaries = find_chunk_boundaries(segments, chunk_size, overlap=OVERLAP, scan_range=SCAN_RANGE)
+    boundaries = find_chunk_boundaries(segments, chunk_size, overlap=overlap, scan_range=SCAN_RANGE)
     total_chunks = len(boundaries)
 
     with chunk_progress() as progress:
@@ -158,12 +180,12 @@ def refine_subtitles(
 
             # Extend backward for non-first chunks
             if chunk_idx > 0:
-                translate_start = max(0, keep_start - BACK_OVERLAP)
+                translate_start = max(0, keep_start - back_overlap)
             else:
                 translate_start = keep_start
 
             # Extend forward for lookahead context
-            translate_end = min(keep_end + OVERLAP, len(segments))
+            translate_end = min(keep_end + overlap, len(segments))
             chunk = segments[translate_start:translate_end]
 
             # Build context from surrounding segments
@@ -182,7 +204,7 @@ def refine_subtitles(
 
             # Following segments as read-only context
             follow_start = translate_end
-            follow_end = min(follow_start + OVERLAP, len(segments))
+            follow_end = min(follow_start + overlap, len(segments))
             if follow_start < follow_end:
                 following = segments[follow_start:follow_end]
                 after_lines = [f"[following] {seg.text}" for seg in following]

@@ -9,52 +9,41 @@ UNTRANSLATED_MARKER = "[?] "
 # ── JSON schema builders ──
 
 
-def build_refine_schema(count: int) -> dict:
-    """Build a strict JSON schema for refinement output with {count} items."""
+def _build_keyed_schema(count: int, name: str) -> dict:
+    """Strict JSON schema requiring keys ``"1"`` through ``"N"``, all strings.
+
+    Keyed dicts give the model a per-item anchor it must echo back, so a
+    drop or merge is structurally visible to the model itself rather than
+    only via a length count. Works in three tiers:
+
+    - ``json_schema`` (strict): each key required → hard guarantee.
+    - ``json_object``: prompt + format keep the model honest.
+    - ``none``: same prompt; parser handles via ``parse_json_response``.
+    """
+    keys = [str(i) for i in range(1, count + 1)]
     return {
         "type": "json_schema",
         "json_schema": {
-            "name": "refinement",
+            "name": name,
             "strict": True,
             "schema": {
                 "type": "object",
-                "properties": {
-                    "refined": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "minItems": count,
-                        "maxItems": count,
-                    }
-                },
-                "required": ["refined"],
+                "properties": {k: {"type": "string"} for k in keys},
+                "required": keys,
                 "additionalProperties": False,
             },
         },
     }
+
+
+def build_refine_schema(count: int) -> dict:
+    """Build a strict JSON schema for refinement output with {count} items."""
+    return _build_keyed_schema(count, "refinement")
 
 
 def build_translation_schema(count: int) -> dict:
     """Build a strict JSON schema for translation output with {count} items."""
-    return {
-        "type": "json_schema",
-        "json_schema": {
-            "name": "translation",
-            "strict": True,
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "translations": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "minItems": count,
-                        "maxItems": count,
-                    }
-                },
-                "required": ["translations"],
-                "additionalProperties": False,
-            },
-        },
-    }
+    return _build_keyed_schema(count, "translation")
 
 
 CLASSIFY_SCHEMA = {
@@ -92,11 +81,15 @@ REFINE_SYSTEM = """\
 You are a professional subtitle editor. Your task is to refine automatic \
 speech recognition (ASR) output into broadcast-quality subtitles.
 
-Strict 1:1 mapping:
-- The output MUST contain EXACTLY the same number of items as the input. \
-No item may be skipped, merged, or left empty.
+Strict 1:1 mapping (CRITICAL):
+- The input is a JSON object with NUMBERED string keys ("1", "2", ...). \
+The output MUST be a JSON object with the SAME keys ("1" through "N"), in \
+the same order, with no keys added, dropped, merged, or split.
 - These are timed subtitles — each segment is synced to audio. \
 Merging or splitting segments would break the timing.
+- An empty string ("") is acceptable for a noise-only line (e.g. "[music]", \
+crowd noise, mic feedback) — the goal is matching count, not non-empty content. \
+Prefer "" over deleting the key.
 
 What to fix:
 - ASR transcription errors (misheard words, homophone mistakes)
@@ -120,22 +113,23 @@ Read them together to understand context before correcting.
 - Use context to resolve ambiguous ASR errors \
 (e.g. "mer" vs "mère" vs "maire" depends on surrounding words).
 
-Output format — return a JSON object with a "refined" array:
-{{"refined": ["text 1", "text 2", ...]}}
+Output format — a JSON object keyed by segment number:
+{{"1": "text 1", "2": "text 2", ...}}
 
 Example:
-Input: {{"translations": ["euh bonjour comment allez vous", \
-"je suis tres content de vous voire", \
-"merci beaucoup pour votre aide"]}}
-Output: {{"refined": ["Bonjour, comment allez-vous ?", \
-"Je suis très content de vous voir.", \
-"Merci beaucoup pour votre aide."]}}
+Input: {{"1": "euh bonjour comment allez vous", \
+"2": "je suis tres content de vous voire", \
+"3": "merci beaucoup pour votre aide"}}
+Output: {{"1": "Bonjour, comment allez-vous ?", \
+"2": "Je suis très content de vous voir.", \
+"3": "Merci beaucoup pour votre aide."}}
 """
 
 REFINE_USER = """\
 Refine these {count} subtitle segments in {language}. \
-Return a JSON object with a "refined" array of EXACTLY {count} strings. \
-Every segment must appear — do NOT merge or skip segments.
+Return a JSON object with EXACTLY the keys "1" through "{count}" — \
+every key must appear, none may be added, merged, or skipped. \
+Use an empty string "" if a line is pure noise.
 
 {context}===BEGIN===
 {json_segments}
@@ -146,11 +140,15 @@ TRANSLATION_SYSTEM = """\
 You are a professional subtitle translator. Translate subtitle segments \
 into natural, idiomatic {target_lang} — not word-for-word from {source_lang}.
 
-Strict 1:1 mapping:
-- The output MUST contain EXACTLY the same number of items as the input. \
-No item may be skipped, merged, or left empty.
+Strict 1:1 mapping (CRITICAL):
+- The input is a JSON object with NUMBERED string keys ("1", "2", ...). \
+The output MUST be a JSON object with the SAME keys ("1" through "N"), in \
+the same order, with no keys added, dropped, merged, or split.
 - These are timed subtitles — each segment is synced to audio. \
 Merging segments would break the timing.
+- An empty string ("") is acceptable for a noise-only segment (e.g. "[music]", \
+crowd noise, mic feedback, untranslatable filler) — the goal is matching the \
+key count, not non-empty content. Prefer "" over dropping the key.
 
 Cross-segment coherence:
 - Consecutive segments are often parts of the same sentence. \
@@ -170,33 +168,37 @@ Other rules:
 - Do NOT add extra text, explanations, or commentary
 
 Example 1 — similar languages (split points align naturally):
-Input:
-{{"translations": ["L'armée a abattu deux avions", \
-"en provenance d'Iran", \
-"au-dessus de la capitale."]}}
-Good: {{"translations": ["The army shot down two planes", \
-"coming from Iran", \
-"over the capital."]}}
-Bad (merged): {{"translations": ["The army shot down two planes from Iran over the capital."]}}
+Input: {{"1": "L'armée a abattu deux avions", \
+"2": "en provenance d'Iran", \
+"3": "au-dessus de la capitale."}}
+Good: {{"1": "The army shot down two planes", \
+"2": "coming from Iran", \
+"3": "over the capital."}}
+Bad (merged into key 1, drops 2 and 3): \
+{{"1": "The army shot down two planes from Iran over the capital."}}
 
 Example 2 — distant languages (split points SHIFT to fit target grammar):
 Same input → Chinese:
-Good (meaning redistributed): {{"translations": ["军队击落了两架", \
-"来自伊朗的飞机，", \
-"就在首都上空。"]}}
-Bad (word-for-word, dangling modifier): {{"translations": ["军队击落了两架飞机", \
-"来自伊朗的", \
-"在首都上空。"]}}
-Note: "飞机" (planes) moved from segment 1 to 2 so each segment is a complete phrase.
+Good (meaning redistributed across the SAME 3 keys): \
+{{"1": "军队击落了两架", \
+"2": "来自伊朗的飞机，", \
+"3": "就在首都上空。"}}
+Bad (word-for-word, dangling modifier): \
+{{"1": "军队击落了两架飞机", \
+"2": "来自伊朗的", \
+"3": "在首都上空。"}}
+Note: "飞机" (planes) moved from segment 1 to 2 so each segment is a \
+complete phrase — but the key count stays at 3.
 
-Output format — return a JSON object with a "translations" array:
-{{"translations": ["text 1", "text 2", ...]}}
+Output format — a JSON object keyed by segment number:
+{{"1": "text 1", "2": "text 2", ...}}
 """
 
 TRANSLATION_USER = """\
 Translate these {count} segments from {source_lang} to {target_lang}. \
-Return a JSON object with a "translations" array of EXACTLY {count} strings. \
-Every segment must appear — do NOT merge or skip segments.
+Return a JSON object with EXACTLY the keys "1" through "{count}" — \
+every key must appear, none may be added, merged, or skipped. \
+Use an empty string "" if a segment is pure noise.
 
 {context}===BEGIN===
 {json_segments}
@@ -214,13 +216,18 @@ def format_numbered_segments(texts: list[str]) -> str:
 
 
 def format_json_segments(texts: list[str]) -> str:
-    """Format subtitle texts as a JSON object with a single array key.
+    """Format subtitle texts as a numbered-key JSON object.
 
-    Output: {"translations": ["text one", "text two", ...]}
-    Collapses newlines within each text to spaces.
+    Output: {"1": "text one", "2": "text two", ...}
+
+    Numbered keys give the model a per-item anchor to echo back, making
+    silent merges or drops structurally visible — the parser can detect
+    a missing "47" key, whereas a length-N array can shrink invisibly.
+    Collapses newlines within each text to spaces so each value is one
+    line (subtitle line wraps are visual only).
     """
-    items = [" ".join(text.split()) for text in texts]
-    return json.dumps({"translations": items}, ensure_ascii=False)
+    items = {str(i + 1): " ".join(text.split()) for i, text in enumerate(texts)}
+    return json.dumps(items, ensure_ascii=False)
 
 
 def format_history_context(
@@ -279,11 +286,12 @@ def parse_numbered_response(response: str, expected_count: int) -> tuple[list[st
 
 
 def parse_json_response(response: str, expected_count: int) -> tuple[list[str], bool]:
-    """Try to parse a JSON object response from the LLM.
+    """Parse a JSON object response from the LLM.
 
-    Supports array format (preferred for json_schema) with fallbacks:
-    1. {"translations": ["t1", ...]} / {"refined": ["t1", ...]} — preferred
-    2. {"1": "t1", "2": "t2", ...} — legacy keyed format
+    Preferred: numbered-key format ``{"1": "t1", "2": "t2", ...}`` —
+    matches what the prompt asks for and gives the parser per-key parity.
+    Fallback: array-wrapped format ``{"translations": [...]}`` /
+    ``{"refined": [...]}`` for older models that ignore the key spec.
     """
     text = response.strip()
     if text.startswith("```"):
@@ -299,13 +307,7 @@ def parse_json_response(response: str, expected_count: int) -> tuple[list[str], 
     if not isinstance(data, dict):
         return [], False
 
-    # Preferred: array format {"translations": [...]} / {"refined": [...]}
-    for key in ("translations", "refined", "translated", "results"):
-        if key in data and isinstance(data[key], list):
-            parsed = [str(item).strip() for item in data[key]]
-            return _normalize_parsed(parsed, expected_count)
-
-    # Legacy: keyed format {"1": "t1", "2": "t2", ...}
+    # Preferred: keyed format {"1": "t1", "2": "t2", ...}
     numeric_keys: dict[int, str] = {}
     for k, v in data.items():
         try:
@@ -316,6 +318,12 @@ def parse_json_response(response: str, expected_count: int) -> tuple[list[str], 
         max_key = max(numeric_keys)
         parsed = [numeric_keys.get(i + 1, "") for i in range(max_key)]
         return _normalize_parsed(parsed, expected_count)
+
+    # Fallback: array format {"translations": [...]} / {"refined": [...]}
+    for key in ("translations", "refined", "translated", "results"):
+        if key in data and isinstance(data[key], list):
+            parsed = [str(item).strip() for item in data[key]]
+            return _normalize_parsed(parsed, expected_count)
 
     return [], False
 

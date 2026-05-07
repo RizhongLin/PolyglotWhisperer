@@ -261,6 +261,7 @@ def run_pipeline(
                     segments,
                     language,
                     config.llm,
+                    chunk_size=chunk_size,
                     on_progress=_on_refine_progress,
                 )
                 llm_was_used = True
@@ -412,9 +413,15 @@ def run_pipeline(
 
         try:
             subprocess.run(
-                ["curl", "-s", "-X", "DELETE",
-                 "http://localhost:11434/api/generate",
-                 "-d", f'{{"model":"{config.llm.model}","keep_alive":0}}'],
+                [
+                    "curl",
+                    "-s",
+                    "-X",
+                    "DELETE",
+                    "http://localhost:11434/api/generate",
+                    "-d",
+                    f'{{"model":"{config.llm.model}","keep_alive":0}}',
+                ],
                 capture_output=True,
                 timeout=5,
             )

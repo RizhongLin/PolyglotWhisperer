@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import json
-import re
 from typing import Callable
 
 from pgw.core.config import LLMConfig
 from pgw.core.models import SubtitleSegment, TranslationResult
-from pgw.llm.chunking import find_chunk_boundaries
+from pgw.llm.chunking import find_chunk_boundaries, resolve_chunk_params
 from pgw.llm.client import complete
 from pgw.llm.prompts import (
     TRANSLATION_SYSTEM,
@@ -26,34 +25,37 @@ from pgw.llm.prompts import (
 from pgw.utils.console import chunk_progress, debug, warning
 from pgw.utils.text import find_sentence_split
 
-CHUNK_SIZE = 48
-OVERLAP = 6  # Forward lookahead — segments translated but discarded, for boundary context
-BACK_OVERLAP = 4  # Backward re-translation — later chunk overwrites previous chunk's tail
+# Cloud/API default — frontier models keep 1:1 keyed JSON alignment
+# reliably up to ~150 segments per call. Empirically, going much higher
+# starts surfacing silent merge / mid-sequence drop in some providers.
+API_CHUNK_SIZE = 150
+
+# Local Ollama models lag on structured output. The log-scale formula
+# already produces ~48 at 70B; this cap is intentional headroom for any
+# future >256B local model and is otherwise a no-op for current hardware.
+LOCAL_CHUNK_SIZE_CAP = 64
+
+# Floors so very small chunks still keep meaningful boundary context.
+# Note: these dominate the proportional 8%/5% scaling for chunk_size
+# below ~75, so tiny chunks pay a high overlap ratio.
+MIN_OVERLAP = 6
+MIN_BACK_OVERLAP = 4
+
 HISTORY_SIZE = 8  # Number of previous translated pairs to include as context
 MAX_RETRY_DEPTH = 3  # Max recursion for binary-split retries
 SCAN_RANGE = 5  # How far to scan for sentence boundaries around ideal split point
 
 
-def _auto_chunk_size(model: str) -> int:
-    """Estimate chunk size from model name based on parameter count.
-
-    Smaller models need smaller chunks to produce reliable JSON output.
-    Uses a log-scale formula: chunk_size = clamp(8 * log2(params), 10, 48)
-    This gives roughly: 0.5B→8, 1B→10, 3B→13, 7B→22, 14B→30, 30B→39, 70B→48
-    """
-    import math
-
-    # Extract parameter count from model name (e.g. "qwen3.5:9b" → 9, "70b" → 70)
-    match = re.search(r"(\d+(?:\.\d+)?)[bB]", model)
-    if not match:
-        return CHUNK_SIZE  # Unknown size (API models, etc.), use default
-
-    params = float(match.group(1))
-    if params <= 0:
-        return CHUNK_SIZE
-
-    size = int(8 * math.log2(max(params, 1)))
-    return max(10, min(size, CHUNK_SIZE))
+def _chunk_params(config: LLMConfig, chunk_size: int | None = None) -> tuple[int, int, int]:
+    """Translator wrapper around the shared resolver."""
+    return resolve_chunk_params(
+        config,
+        chunk_size,
+        api_default=API_CHUNK_SIZE,
+        local_cap=LOCAL_CHUNK_SIZE_CAP,
+        min_overlap=MIN_OVERLAP,
+        min_back_overlap=MIN_BACK_OVERLAP,
+    )
 
 
 def parse_response(response: str, expected_count: int) -> tuple[list[str], bool]:
@@ -209,8 +211,8 @@ def translate_subtitles(
     """Translate subtitle segments using an LLM.
 
     Uses a sliding window with sentence-boundary-aware chunking:
-    - Forward overlap: OVERLAP segments translated as lookahead but discarded
-    - Backward overlap: BACK_OVERLAP segments re-translated and overwritten,
+    - Forward overlap: ``overlap`` segments translated as lookahead but discarded
+    - Backward overlap: ``back_overlap`` segments re-translated and overwritten,
       so boundary segments end up mid-window with full bidirectional context
     - Split points prefer sentence endings and timing gaps
     - Preceding context shows bilingual pairs (source + translation)
@@ -228,8 +230,7 @@ def translate_subtitles(
     Returns:
         TranslationResult with original and translated segments.
     """
-    if chunk_size is None:
-        chunk_size = _auto_chunk_size(config.model)
+    chunk_size, overlap, back_overlap = _chunk_params(config, chunk_size)
 
     translated: list[SubtitleSegment] = []
 
@@ -243,7 +244,7 @@ def translate_subtitles(
     recent_translated: list[str] = []
 
     # --- Issue 3: Sentence-boundary-aware chunking ---
-    boundaries = find_chunk_boundaries(segments, chunk_size, overlap=OVERLAP, scan_range=SCAN_RANGE)
+    boundaries = find_chunk_boundaries(segments, chunk_size, overlap=overlap, scan_range=SCAN_RANGE)
     total_chunks = len(boundaries)
 
     with chunk_progress() as progress:
@@ -257,12 +258,12 @@ def translate_subtitles(
             # Extend window backward for non-first chunks — re-translate boundary
             # segments that were at the tail of the previous chunk's window
             if chunk_idx > 0:
-                translate_start = max(0, keep_start - BACK_OVERLAP)
+                translate_start = max(0, keep_start - back_overlap)
             else:
                 translate_start = keep_start
 
             # Extend window forward — lookahead for boundary context
-            translate_end = min(keep_end + OVERLAP, len(segments))
+            translate_end = min(keep_end + overlap, len(segments))
             chunk = segments[translate_start:translate_end]
 
             # Build reference context
@@ -279,7 +280,7 @@ def translate_subtitles(
             # Bilingual overlap context — segments before the translation window
             overlap_parts = []
             if translate_start > 0:
-                before_start = max(0, translate_start - OVERLAP)
+                before_start = max(0, translate_start - overlap)
                 before_source = [segments[j].text for j in range(before_start, translate_start)]
                 before_trans = [translated[j].text for j in range(before_start, translate_start)]
                 bilingual = format_bilingual_context(before_source, before_trans)
@@ -288,7 +289,7 @@ def translate_subtitles(
 
             # Following segments (not yet translated) — source only
             follow_start = translate_end
-            follow_end = min(follow_start + OVERLAP, len(segments))
+            follow_end = min(follow_start + overlap, len(segments))
             if follow_start < follow_end:
                 following = segments[follow_start:follow_end]
                 following_texts = [" ".join(seg.text.split()) for seg in following]

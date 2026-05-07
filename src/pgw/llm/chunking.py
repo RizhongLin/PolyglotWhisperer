@@ -6,8 +6,64 @@ algorithm with configurable overlap and scan ranges.
 
 from __future__ import annotations
 
+import math
+import re
+
+from pgw.core.config import LLMConfig
 from pgw.core.models import SubtitleSegment
 from pgw.utils.text import SENTENCE_END_CHARS, TIMING_GAP_THRESHOLD
+
+
+def _local_chunk_size_from_model(model: str, cap: int) -> int:
+    """Estimate a local Ollama model's chunk size from its parameter count.
+
+    chunk_size = clamp(8 * log2(params_b), 10, cap), where ``params_b`` is
+    pulled from a ``\\d+b`` suffix in the model name (e.g. "qwen3:8b" → 8).
+    Falls back to ``cap`` when the name has no parseable size.
+    """
+    match = re.search(r"(\d+(?:\.\d+)?)[bB]", model)
+    if not match:
+        return cap
+    params = float(match.group(1))
+    if params <= 0:
+        return cap
+    size = int(8 * math.log2(max(params, 1)))
+    return max(10, min(size, cap))
+
+
+def resolve_chunk_params(
+    config: LLMConfig,
+    chunk_size: int | None,
+    *,
+    api_default: int,
+    local_cap: int,
+    min_overlap: int,
+    min_back_overlap: int,
+) -> tuple[int, int, int]:
+    """Resolve ``(chunk_size, overlap, back_overlap)`` for one LLM run.
+
+    Precedence (highest first): the explicit ``chunk_size`` argument
+    (typically a CLI ``--chunk-size`` flag), ``LLMConfig.chunk_size``
+    from TOML/env, then the auto-detected default — ``api_default`` for
+    cloud backends or a log-scaled estimate from the local model name.
+
+    Overlaps scale at ~8% / ~5% of the resolved chunk size, but never
+    drop below the supplied floors. The floors dominate small chunks
+    (translator: ``chunk_size < ~75``; refine: ``< ~50``), so a user
+    pinning a tiny chunk for debugging will still see meaningful
+    boundary context — at the cost of a high overlap-to-payload ratio.
+    """
+    if chunk_size is None:
+        chunk_size = config.chunk_size
+    if chunk_size is None:
+        chunk_size = (
+            api_default
+            if config.backend == "api"
+            else _local_chunk_size_from_model(config.model, local_cap)
+        )
+    overlap = max(min_overlap, round(chunk_size * 0.08))
+    back_overlap = max(min_back_overlap, round(chunk_size * 0.05))
+    return chunk_size, overlap, back_overlap
 
 
 def find_chunk_boundaries(
