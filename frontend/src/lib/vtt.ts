@@ -70,19 +70,28 @@ export function groupBilingualCues(cues: VttCue[]): VttCuePair[] {
     const a = cues[i]!;
     const b = i + 1 < cues.length ? cues[i + 1] : null;
     if (b && a.start === b.start && a.end === b.end) {
-      groups.push({
-        start: a.start,
-        end: a.end,
-        primary: b.text,
-        secondary: a.text,
-      });
-    } else if (a.text) {
-      groups.push({
-        start: a.start,
-        end: a.end,
-        primary: a.text,
-        secondary: '',
-      });
+      const ta = a.text.replace(/<[^>]*>/g, '').trim();
+      const tb = b.text.replace(/<[^>]*>/g, '').trim();
+      if (ta || tb) {
+        groups.push({
+          start: a.start,
+          end: a.end,
+          primary: tb,
+          secondary: ta,
+        });
+      }
+    } else {
+      const ta = a.text.replace(/<[^>]*>/g, '').trim();
+      if (ta) {
+        groups.push({
+          start: a.start,
+          end: a.end,
+          primary: ta,
+          secondary: '',
+        });
+      }
+      // Re-process b as start of next pair (old parity-preserving logic)
+      if (b) i--;
     }
   }
   return groups;

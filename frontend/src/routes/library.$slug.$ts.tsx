@@ -428,6 +428,10 @@ function Transcript({
     for (const w of vocab.top_rare_words) {
       m.set(w.word.toLowerCase(), w);
       if (w.word !== w.word.toLowerCase()) m.set(w.word, w);
+      if (w.lemma && w.lemma.toLowerCase() !== w.word.toLowerCase()) {
+        m.set(w.lemma.toLowerCase(), w);
+        if (w.lemma !== w.lemma.toLowerCase()) m.set(w.lemma, w);
+      }
     }
     return m;
   }, [vocab]);
@@ -443,13 +447,17 @@ function Transcript({
 
   const displayItems: DisplayItem[] = useMemo(() => {
     if (isBilingual) {
-      return groupBilingualCues(cues);
+      return groupBilingualCues(cues).filter(
+        (p) => p.primary.trim() || p.secondary.trim(),
+      );
     }
-    return cues.map((c) => ({
-      start: c.start,
-      end: c.end,
-      ...splitBilingual(c.text),
-    }));
+    return cues
+      .map((c) => ({
+        start: c.start,
+        end: c.end,
+        ...splitBilingual(c.text.replace(/<[^>]*>/g, '')),
+      }))
+      .filter((d) => d.primary.trim() || d.secondary.trim());
   }, [cues, isBilingual]);
 
   const ANTICIPATE = 0.3;
@@ -466,6 +474,15 @@ function Transcript({
     }
     return -1;
   }, [displayItems, currentTime]);
+
+  const effectivePast = useMemo(() => {
+    if (activeIndex >= 0) return activeIndex;
+    // No active cue — dim everything whose end time has passed
+    for (let i = displayItems.length - 1; i >= 0; i--) {
+      if (currentTime >= displayItems[i]!.end + LINGER) return i;
+    }
+    return -1;
+  }, [displayItems, currentTime, activeIndex]);
 
   const scrollerRef = useRef<HTMLDivElement>(null);
   const activeRef = useRef<HTMLButtonElement>(null);
@@ -602,8 +619,8 @@ function Transcript({
       <div ref={scrollerRef} className="max-h-[28rem] overflow-y-auto p-2">
         {displayItems.map((item, i) => {
           const active = i === activeIndex;
-          const past = activeIndex >= 0 && i < activeIndex;
-          const future = activeIndex >= 0 && i > activeIndex;
+          const past = activeIndex >= 0 ? i < activeIndex : i <= effectivePast;
+          const future = activeIndex >= 0 ? i > activeIndex : i > effectivePast;
           return (
             <button
               key={i}
