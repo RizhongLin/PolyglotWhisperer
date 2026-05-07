@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useRouterState } from '@tanstack/react-router';
-import { Moon, Sun, Sparkles } from 'lucide-react';
+import { Moon, Sun } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useTheme } from '@/lib/theme';
 import { cn } from '@/lib/cn';
@@ -30,7 +30,7 @@ export function Header() {
     >
       <div className="mx-auto flex h-14 max-w-6xl items-center gap-6 px-6">
         <Link to="/" className="flex items-center gap-2 font-semibold">
-          <Sparkles className="size-5 text-primary" />
+          <img src="/icon.png" alt="" className="h-5 w-5 object-contain" />
           <span className="tracking-tight">PolyglotWhisperer</span>
         </Link>
         <nav className="flex items-center gap-1">
