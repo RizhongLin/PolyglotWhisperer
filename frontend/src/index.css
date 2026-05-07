@@ -88,8 +88,32 @@
   ::after {
     border-color: var(--color-border);
   }
+  html {
+    overflow-y: auto;
+    scrollbar-gutter: stable both-edges;
+  }
   body {
     font-feature-settings: 'rlig' 1, 'calt' 1, 'ss01' 1;
+  }
+  /* Custom scrollbar — thin, themed, subtle */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--color-border);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--color-muted-foreground);
+  }
+  /* Firefox */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border) transparent;
   }
 }
 
