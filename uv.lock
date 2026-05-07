@@ -1146,9 +1146,13 @@ all = [
 ]
 dev = [
     { name = "black" },
+    { name = "fastapi" },
+    { name = "httpx" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
+    { name = "python-multipart" },
     { name = "ruff" },
+    { name = "uvicorn" },
 ]
 download = [
     { name = "yt-dlp" },
@@ -1186,8 +1190,10 @@ requires-dist = [
     { name = "black", marker = "extra == 'dev'", specifier = ">=24.0" },
     { name = "ebooklib", marker = "extra == 'export'", specifier = ">=0.18" },
     { name = "fastapi", marker = "extra == 'serve'", specifier = ">=0.115" },
+    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
     { name = "openai", marker = "extra == 'llm'", specifier = ">=1.0" },
     { name = "pgw", extras = ["nlp"], marker = "extra == 'vocab'" },
+    { name = "pgw", extras = ["serve"], marker = "extra == 'dev'" },
     { name = "pgw", extras = ["transcribe", "download", "llm", "nlp", "vocab", "export", "serve"], marker = "extra == 'all'" },
     { name = "pip", marker = "extra == 'nlp'" },
     { name = "pydantic", specifier = ">=2.0" },

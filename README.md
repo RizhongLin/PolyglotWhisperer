@@ -25,7 +25,7 @@ spaCy language models download automatically on first use.
 ## Basic Usage
 
 ```bash
-# Full pipeline: download → transcribe → refine → translate
+# Full pipeline: download → transcribe → (refine + translate combined)
 pgw run video.mp4 -l fr --refine --translate en
 
 # From a URL (requires yt-dlp)
@@ -57,7 +57,7 @@ All pipeline output lands in `pgw_workspace/<slug>/<timestamp>/` alongside a `me
 
 ## Backends
 
-| Component                | Local (default)          | Cloud API                                      |
+| Component                | Local                    | Cloud API (default)                            |
 | ------------------------ | ------------------------ | ---------------------------------------------- |
 | Transcription            | stable-ts (MLX/CUDA/CPU) | OpenAI SDK → Groq, OpenAI, custom servers      |
 | Translation / Refinement | Ollama (via OpenAI SDK)  | OpenAI SDK → DeepSeek, Groq, OpenAI, Claude, … |
@@ -116,7 +116,7 @@ The web UI is a **React SPA** built from `frontend/` (Vite + TypeScript + TanSta
 Pages:
 
 - **Library** (`/library`) — workspace grid with thumbnails, language pair, difficulty, dates. Click any card to open the player.
-- **Studio** (`/studio`) — paste a URL or drop a file, pick source language + translation target, hit *Start*. Live progress cards stream events from the backend; cancel any time, close the tab and come back without losing state. Advanced flags (backends, models, chunk size, ffmpeg start/duration, refine, subs) are tucked behind a disclosure.
+- **Studio** (`/studio`) — paste a URL or drop a file, pick source language + translation target, hit _Start_. Live progress cards stream events from the backend; cancel any time, close the tab and come back without losing state. Advanced flags (backends, models, chunk size, ffmpeg start/duration, refine, subs) are tucked behind a disclosure.
 - **Player** (`/library/<slug>/<ts>`) — HTML5 video, click-to-seek transcript with anticipate/linger windows, track switcher (bilingual / original / translation), vocab card (top rare words + difficulty), downloads card, re-download fallback for missing video files.
 
 Backend is **FastAPI + uvicorn** serving JSON over `/api/...` and raw workspace files over `/ws/<slug>/<ts>/<file>`. Job state is persisted as append-only JSONL under `<workspace>/.jobs/`, so an in-flight job survives a browser refresh and the server's restart marks orphaned jobs as `interrupted` rather than leaving them stuck.
