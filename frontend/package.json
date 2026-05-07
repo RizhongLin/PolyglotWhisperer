@@ -1,0 +1,16 @@
+{
+  "name": "pgw-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TypeScript frontend bundle for the pgw serve UI.",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.0"
+  }
+}

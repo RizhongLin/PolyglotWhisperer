@@ -57,10 +57,10 @@ All pipeline output lands in `pgw_workspace/<slug>/<timestamp>/` alongside a `me
 
 ## Backends
 
-| Component                | Local (default)          | Cloud API                            |
-| ------------------------ | ------------------------ | ------------------------------------ |
-| Transcription            | stable-ts (MLX/CUDA/CPU) | LiteLLM → Groq, OpenAI, etc.         |
-| Translation / Refinement | Ollama                   | LiteLLM → Groq, OpenAI, Claude, etc. |
+| Component                | Local (default)          | Cloud API                                      |
+| ------------------------ | ------------------------ | ---------------------------------------------- |
+| Transcription            | stable-ts (MLX/CUDA/CPU) | OpenAI SDK → Groq, OpenAI, custom servers      |
+| Translation / Refinement | Ollama (via OpenAI SDK)  | OpenAI SDK → DeepSeek, Groq, OpenAI, Claude, … |
 
 Any OpenAI SDK-compatible server works too — set `api_base`, `api_key`, and `api_model`:
 
@@ -104,14 +104,23 @@ target_language = "en"
 
 Env vars use `PGW_` prefix: `PGW_WHISPER__BACKEND=api`, `PGW_LLM__API_MODEL=groq/...`. See `.env.example` for all options.
 
-## Web Player
+## Web UI
 
 ```bash
-pgw serve                      # library view of all workspaces
-pgw serve <workspace-dir>       # single video player
+pgw serve                      # library + end-to-end pipeline launcher
+pgw serve <workspace-dir>       # single-workspace player
 ```
 
-The player includes keyboard shortcuts (← → ↑ ↓ Space f 1-3), click-to-seek in transcript, and click-any-word to reveal difficulty + translation when vocabulary data is available.
+The library page lets you launch a new pipeline run from the browser — paste a URL or drop a local file, pick source language and translation target, and watch live progress. Cancel mid-run, refresh the tab without losing state, and click into the finished workspace when it's done. The player includes keyboard shortcuts (← → ↑ ↓ Space f 1-3), click-to-seek in transcript, and click-any-word to reveal difficulty + translation when vocabulary data is available.
+
+Backend is **FastAPI + uvicorn**; frontend is a **TypeScript** bundle compiled to `src/pgw/templates/jobs.js`. Job state is persisted as append-only JSONL under `<workspace>/.jobs/`, so an in-flight job survives a browser refresh and the server's restart marks orphaned jobs as `interrupted` rather than leaving them stuck.
+
+Knobs:
+
+- `PGW_SERVE_HOST` — bind address (default `127.0.0.1`; Docker sets `0.0.0.0`).
+- `PGW_SERVE_MAX_JOBS` — concurrent pipeline workers (default `1`, keeps Whisper warm).
+- `PGW_JOBS_RETENTION` — how many finished job logs to keep (default `200`).
+- `PGW_DEV` — when set, re-read `jobs.js` from disk on every request so frontend devs running `npm run watch` only need to refresh the browser (no `pgw serve` restart).
 
 ## Vocabulary
 
@@ -124,6 +133,8 @@ pgw export <workspace>                   # → vocabulary.csv for Anki
 
 ## Docker
 
+The image is multi-stage: a Node stage builds the TypeScript frontend, then a uv stage installs the Python wheel with all extras (transcribe, llm, vocab, export, **serve**). End users never need Node installed.
+
 ```bash
 docker build -t pgw .
 ```
@@ -131,15 +142,17 @@ docker build -t pgw .
 All commands work inside Docker — mount your project at `/data` and ensure `.env` has your API keys:
 
 ```bash
-# Web player
+# Web UI (library + end-to-end pipeline)
 docker run --rm -it -p 8321:8321 -v "$PWD:/data" pgw serve --no-open
 
-# Full pipeline
+# Full pipeline (CLI)
 docker run --rm -it -v "$PWD:/data" pgw run /data/video.mp4 -l fr \
   --translate en --backend api --llm-backend api --no-play
 ```
 
-**Dev mode** — mount `src/` to skip rebuilds on code changes:
+The mounted `/data` is also where `pgw_workspace/` and `pgw_workspace/.jobs/<id>.jsonl` live — keep the volume mount stable across restarts so in-flight jobs reattach cleanly.
+
+**Dev mode** — mount `src/` to iterate on Python without rebuilding:
 
 ```bash
 docker run --rm -it -p 8321:8321 \
@@ -147,36 +160,61 @@ docker run --rm -it -p 8321:8321 \
   pgw serve --no-open
 ```
 
-Only `pyproject.toml` or `uv.lock` changes require a rebuild.
+`docker build` always rebuilds the frontend bundle from the TypeScript source via the `js-builder` stage, so you don't need Node locally to ship a Docker image. The host-side `npm run build` step is only needed when running `pgw serve` directly against your working tree (no Docker), since `pgw serve` reads the bundle that's already on disk.
 
 ## Architecture
 
 ```
 src/pgw/
-├── cli/          Typer commands (run, transcribe, translate, etc.)
+├── cli/          Typer commands (run, transcribe, translate, serve, …)
 ├── core/         Config (Pydantic), pipeline orchestrator, events
 ├── downloader/   yt-dlp wrapper, URL resolver
-├── llm/          LiteLLM client, translation, refinement, prompts
-├── server/       Web player HTTP handlers + HTML templates
+├── llm/          OpenAI SDK client, translation, refinement, prompts
+├── server/       FastAPI app (library + jobs API), JobManager, exceptions
 ├── subtitles/    Format conversion (VTT/SRT), PDF/EPUB export
 ├── transcriber/  Whisper backends (stable-ts local + API), segmentation
-├── templates/    HTML/CSS/JS for web player and library
+├── templates/    HTML/CSS for player & library + the built jobs.js bundle
 ├── utils/        Audio extraction, cache, logging, spaCy, paths
 └── vocab/        Vocabulary analysis + CEFR estimation
+
+frontend/        TypeScript source for the library page (compiles → src/pgw/templates/jobs.js)
+├── src/         types.ts, api.ts, dom.ts, jobs.ts
+├── build.mjs    esbuild driver
+└── tsconfig.json
+```
+
+Rebuild the frontend bundle after editing TypeScript:
+
+```bash
+cd frontend && npm ci && npm run build            # → ../src/pgw/templates/jobs.js
+cd frontend && npm run typecheck                  # tsc --noEmit
+cd frontend && npm run watch                      # rebuild on save (sourcemaps inline)
+```
+
+For a tight TypeScript dev loop without restarting the Python server:
+
+```bash
+# terminal 1 — rebuild the bundle on every save
+cd frontend && npm run watch
+
+# terminal 2 — refresh the browser to pick up the new bundle
+PGW_DEV=1 pgw serve --no-open
 ```
 
 ## Tech Stack
 
-| Role          | Library                                       |
-| ------------- | --------------------------------------------- |
-| Transcription | stable-ts (local), LiteLLM (cloud)            |
-| LLMs          | LiteLLM + Ollama                              |
-| NLP           | spaCy (POS, lemmatizer), wordfreq (frequency) |
-| Subtitles     | pysubs2                                       |
-| Download      | yt-dlp                                        |
-| Export        | WeasyPrint (PDF), ebooklib (EPUB)             |
-| CLI           | Typer + Rich                                  |
-| Playback      | mpv, built-in HTTP server                     |
+| Role            | Library                                                          |
+| --------------- | ---------------------------------------------------------------- |
+| Transcription   | stable-ts (local), OpenAI SDK (cloud / OpenAI-compatible)        |
+| LLMs            | OpenAI SDK → Ollama / DeepSeek / Groq / OpenAI / Claude / custom |
+| NLP             | spaCy (POS, lemmatizer), wordfreq (frequency)                    |
+| Subtitles       | pysubs2                                                          |
+| Download        | yt-dlp                                                           |
+| Export          | WeasyPrint (PDF), ebooklib (EPUB)                                |
+| CLI             | Typer + Rich                                                     |
+| Web UI backend  | FastAPI + uvicorn                                                |
+| Web UI frontend | TypeScript + esbuild (vanilla, no framework)                     |
+| Playback        | mpv (CLI), browser `<video>` (web UI)                            |
 
 ## License
 

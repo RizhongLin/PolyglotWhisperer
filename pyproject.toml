@@ -40,8 +40,13 @@ export = [
     "weasyprint>=62",
     "ebooklib>=0.18",
 ]
+serve = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "python-multipart>=0.0.9",
+]
 all = [
-    "pgw[transcribe,download,llm,nlp,vocab,export]",
+    "pgw[transcribe,download,llm,nlp,vocab,export,serve]",
 ]
 dev = [
     "pytest>=8.0",

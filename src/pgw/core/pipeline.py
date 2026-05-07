@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import gc
 import json
+import threading
 from pathlib import Path
 
 from pgw.core.config import PGWConfig
 from pgw.core.events import EventCallback, PipelineEvent
 from pgw.downloader.resolver import resolve
+from pgw.server.exceptions import JobCancelled
 from pgw.utils.audio import extract_audio_cached
 from pgw.utils.cache import (
     atomic_write_text,
@@ -37,6 +39,7 @@ def run_pipeline(
     duration: str | None = None,
     on_event: EventCallback | None = None,
     chunk_size: int | None = None,
+    cancel_token: threading.Event | None = None,
 ) -> Path:
     """Run the full processing pipeline.
 
@@ -49,12 +52,15 @@ def run_pipeline(
         start: Start time for audio clipping (ffmpeg format).
         duration: Duration to extract (ffmpeg format).
         on_event: Optional callback for streaming progress events.
-
-    Returns:
-        Path to the workspace directory.
+        cancel_token: Optional ``threading.Event`` — when set between stages
+            the pipeline raises ``JobCancelled``. Granularity is between
+            stages (download/audio/transcribe/translate/vocab/save), not
+            mid-Whisper or mid-LLM call.
     """
 
     def emit(stg: str, progress: float, message: str, data: dict | None = None) -> None:
+        if cancel_token is not None and cancel_token.is_set():
+            raise JobCancelled()
         if on_event:
             on_event(PipelineEvent(stage=stg, progress=progress, message=message, data=data))
 

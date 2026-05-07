@@ -21,12 +21,146 @@
         </p>
       </hgroup>
       <button
+        id="new-job-open"
+        class="contrast new-job-btn"
+        type="button"
+      >+ New job</button>
+      <button
         id="theme-toggle"
         class="outline secondary"
         aria-label="Toggle theme"
       ></button>
     </header>
-    <main>{content}</main>
+    <main>
+      <section id="jobs-strip" hidden></section>
+      {content}
+    </main>
+    <dialog id="new-job-dialog">
+      <article>
+        <header>
+          <h3 style="margin:0">New job</h3>
+        </header>
+        <form id="new-job-form">
+          <fieldset>
+            <label for="new-job-input">URL or local path</label>
+            <input
+              id="new-job-input"
+              name="input"
+              type="text"
+              placeholder="https://..., /path/to/video.mp4"
+              autocomplete="off"
+            />
+            <label for="new-job-file" style="margin-top:0.5rem">…or upload a file</label>
+            <input id="new-job-file" name="file" type="file" />
+          </fieldset>
+          <div class="form-row">
+            <div>
+              <label for="new-job-language">Source language</label>
+              <input
+                id="new-job-language"
+                name="language"
+                type="text"
+                value="{default_language}"
+                required
+              />
+            </div>
+            <div>
+              <label for="new-job-translate">Translate to (optional)</label>
+              <input
+                id="new-job-translate"
+                name="translate"
+                type="text"
+                value="{default_translate}"
+                placeholder="e.g. en, zh"
+              />
+            </div>
+          </div>
+          <details>
+            <summary>Advanced</summary>
+            <div class="form-row">
+              <div>
+                <label for="new-job-backend">Whisper backend</label>
+                <select id="new-job-backend" name="backend">
+                  <option value="">(default: {default_backend})</option>
+                  <option value="local">local</option>
+                  <option value="api">api</option>
+                </select>
+              </div>
+              <div>
+                <label for="new-job-llm-backend">LLM backend</label>
+                <select id="new-job-llm-backend" name="llm_backend">
+                  <option value="">(default: {default_llm_backend})</option>
+                  <option value="local">local</option>
+                  <option value="api">api</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row">
+              <div>
+                <label for="new-job-whisper-model">Whisper model</label>
+                <input
+                  id="new-job-whisper-model"
+                  name="whisper_model"
+                  type="text"
+                  placeholder="default: {default_whisper_model}"
+                />
+              </div>
+              <div>
+                <label for="new-job-llm-model">LLM model</label>
+                <input
+                  id="new-job-llm-model"
+                  name="llm_model"
+                  type="text"
+                  placeholder="default: {default_llm_model}"
+                />
+              </div>
+            </div>
+            <div class="form-row">
+              <div>
+                <label for="new-job-start">Start (ffmpeg)</label>
+                <input
+                  id="new-job-start"
+                  name="start"
+                  type="text"
+                  placeholder="e.g. 00:01:00"
+                />
+              </div>
+              <div>
+                <label for="new-job-duration">Duration (ffmpeg)</label>
+                <input
+                  id="new-job-duration"
+                  name="duration"
+                  type="text"
+                  placeholder="e.g. 00:05:00"
+                />
+              </div>
+            </div>
+            <div class="form-row">
+              <div>
+                <label for="new-job-chunk-size">Chunk size (segments)</label>
+                <input
+                  id="new-job-chunk-size"
+                  name="chunk_size"
+                  type="number"
+                  min="1"
+                  max="400"
+                  placeholder="auto"
+                />
+              </div>
+              <div class="checkbox-row" style="align-self:end">
+                <label><input type="checkbox" name="refine" /> Refine</label>
+                <label><input type="checkbox" name="subs" /> Existing subs</label>
+              </div>
+            </div>
+          </details>
+          <div id="new-job-error" role="alert"></div>
+          <div class="dialog-actions">
+            <button id="new-job-cancel" type="button" class="outline secondary">Cancel</button>
+            <button id="new-job-submit" type="submit">Start job</button>
+          </div>
+        </form>
+      </article>
+    </dialog>
     <footer>
       <p><img src="/logo.png" class="footer-logo" alt="PolyglotWhisperer" /></p>
       <p>
@@ -78,5 +212,6 @@
 
       lucide.createIcons();
     </script>
+    <script src="/jobs.js"></script>
   </body>
 </html>

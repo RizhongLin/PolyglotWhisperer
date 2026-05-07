@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import json
+import os
 import re
 import typing
 import urllib.parse
@@ -31,6 +32,28 @@ _LIBRARY_CSS = (files("pgw.templates") / "library.css").read_text(encoding="utf-
 _PLAYER_JS = (files("pgw.templates") / "player.js").read_text(encoding="utf-8")
 _ICON_PNG = (files("pgw.templates") / "icon.png").read_bytes()
 _LOGO_PNG = (files("pgw.templates") / "logo.png").read_bytes()
+
+
+# ── Frontend bundle loader ──
+# The TypeScript bundle at templates/jobs.js is built by ``frontend/`` and
+# committed. We cache the bytes at import time for the production hot path,
+# but also re-read on every request when ``PGW_DEV`` is set so frontend
+# devs running ``npm run watch`` only need to refresh the browser — no
+# ``pgw serve`` restart.
+
+_JOBS_JS_PATH = files("pgw.templates") / "jobs.js"
+_JOBS_JS = _JOBS_JS_PATH.read_text(encoding="utf-8")
+
+
+def get_jobs_js() -> str:
+    """Return the jobs.js bundle, re-reading from disk under ``PGW_DEV``."""
+    if os.environ.get("PGW_DEV"):
+        try:
+            return _JOBS_JS_PATH.read_text(encoding="utf-8")
+        except OSError:
+            return _JOBS_JS
+    return _JOBS_JS
+
 
 # ── Constants ──
 _DESC_MAX_CHARS = 200
@@ -718,10 +741,41 @@ def _build_library_html(workspaces: list[dict]) -> str:
             )
         content = f'<div class="ws-grid">{"".join(cards)}</div>'
 
+    defaults = _form_defaults()
     return _LIBRARY_TEMPLATE.format(
         content=content,
         github_url=GITHUB_URL,
+        **defaults,
     )
+
+
+def _form_defaults() -> dict[str, str]:
+    """Pull current config defaults to pre-fill the new-job form.
+
+    Best-effort: if config loading fails for any reason, return safe
+    placeholders so the page still renders.
+    """
+    try:
+        from pgw.core.config import load_config
+
+        cfg = load_config()
+        return {
+            "default_language": html.escape(cfg.whisper.language or "fr"),
+            "default_translate": html.escape(cfg.llm.target_language or ""),
+            "default_backend": html.escape(cfg.whisper.backend or "local"),
+            "default_llm_backend": html.escape(cfg.llm.backend or "local"),
+            "default_whisper_model": html.escape(cfg.whisper.model or ""),
+            "default_llm_model": html.escape(cfg.llm.model or ""),
+        }
+    except Exception:
+        return {
+            "default_language": "fr",
+            "default_translate": "",
+            "default_backend": "local",
+            "default_llm_backend": "local",
+            "default_whisper_model": "",
+            "default_llm_model": "",
+        }
 
 
 def _update_workspace_meta(workspace: Path, source: object) -> None:
