@@ -1,5 +1,5 @@
 [whisper]
-backend = "local"
+backend = "api"
 local_model = "large-v3-turbo"
 api_model = "whisper-large-v3-turbo"
 language = "fr"
@@ -7,7 +7,7 @@ device = "auto"
 word_timestamps = true
 
 [llm]
-backend = "local"
+backend = "api"
 local_model = "qwen3:8b"
 api_model = "deepseek-chat"
 temperature = 0.3

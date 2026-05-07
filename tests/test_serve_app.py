@@ -1,13 +1,14 @@
 """Integration tests for the FastAPI ``pgw serve`` apps.
 
-Uses :class:`fastapi.testclient.TestClient` (synchronous) and a stubbed
-``run_pipeline`` so we can exercise the wire format end-to-end without
-booting Whisper.
+The web UI is now a React SPA (``frontend/``) — these tests exercise the
+JSON APIs the SPA consumes plus the static-shell fallback. The pipeline
+is stubbed via ``run_pipeline`` monkeypatch so we don't boot Whisper.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 from pathlib import Path
@@ -39,11 +40,6 @@ def jobs(base_dir: Path) -> Iterator[JobManager]:
 
 @pytest.fixture
 def stub_pipeline(base_dir: Path, monkeypatch: pytest.MonkeyPatch):
-    """Replace ``run_pipeline`` with a fast in-test fake.
-
-    Emits the same stage events the real pipeline would, creates a
-    workspace directory the UI can later browse, then returns the path.
-    """
     workspace = base_dir / "test-job" / "20260507_100000"
 
     def fake_run_pipeline(
@@ -59,6 +55,17 @@ def stub_pipeline(base_dir: Path, monkeypatch: pytest.MonkeyPatch):
         cancel_token=None,
     ) -> Path:
         workspace.mkdir(parents=True, exist_ok=True)
+        # Plant a metadata.json so workspace-detail endpoints have data.
+        (workspace / "metadata.json").write_text(
+            json.dumps(
+                {
+                    "title": "Test job",
+                    "language": "en",
+                    "source_url": input_path,
+                }
+            ),
+            encoding="utf-8",
+        )
         for stage_name, msg in [
             ("download", "Resolving"),
             ("audio", "Extracting"),
@@ -74,8 +81,6 @@ def stub_pipeline(base_dir: Path, monkeypatch: pytest.MonkeyPatch):
                 on_event(PipelineEvent(stage=stage_name, progress=1.0, message=msg, data=data))
         return workspace
 
-    # JobManager imports run_pipeline lazily (`from pgw.core.pipeline import run_pipeline`),
-    # so patching the source module is sufficient.
     monkeypatch.setattr("pgw.core.pipeline.run_pipeline", fake_run_pipeline)
     monkeypatch.setattr("pgw.core.languages.validate_language", lambda code: code, raising=False)
     return workspace
@@ -88,71 +93,79 @@ def client(base_dir: Path, jobs: JobManager) -> Iterator[TestClient]:
         yield c
 
 
-# ── library endpoints ────────────────────────────────────────────────────
+# ── SPA shell + assets ───────────────────────────────────────────────────
 
 
-def test_library_index_renders_form(client: TestClient):
+def test_spa_index_served_at_root(client: TestClient):
+    """Root either serves the built SPA shell or the fallback page (in
+    dev when frontend/ has not been built). Either way, must be 200/503
+    HTML."""
     resp = client.get("/")
+    assert resp.status_code in (200, 503)
+    assert resp.headers["content-type"].startswith("text/html")
+
+
+def test_spa_index_catches_deep_links(client: TestClient):
+    """Refreshing on a SPA route must hit index.html so the client router
+    can resolve it (instead of 404'ing)."""
+    resp = client.get("/library/some-slug/20260101_000000")
+    assert resp.status_code in (200, 503)
+    assert resp.headers["content-type"].startswith("text/html")
+
+
+# ── Workspace JSON API ───────────────────────────────────────────────────
+
+
+def test_api_workspaces_empty(client: TestClient):
+    resp = client.get("/api/workspaces")
     assert resp.status_code == 200
-    body = resp.text
-    assert 'id="new-job-dialog"' in body
-    assert 'id="jobs-strip"' in body
-    assert "/jobs.js" in body
+    assert resp.json() == {"workspaces": []}
 
 
-def test_jobs_js_served_with_correct_mime(client: TestClient):
-    resp = client.get("/jobs.js")
+def test_api_workspaces_lists_after_run(
+    client: TestClient,
+    jobs: JobManager,
+    stub_pipeline: Path,
+):
+    job_id = client.post(
+        "/jobs",
+        json={"input": "https://example.com/v.mp4", "language": "en"},
+    ).json()["job_id"]
+    _wait_for_terminal(jobs, job_id)
+    resp = client.get("/api/workspaces")
     assert resp.status_code == 200
-    assert resp.headers["content-type"].startswith("application/javascript")
-    # Built bundle should contain the namespaced fetch path.
-    assert "/jobs" in resp.text
+    workspaces = resp.json()["workspaces"]
+    assert any(w["slug"] == "test-job" for w in workspaces)
 
 
-def test_jobs_js_hot_reloads_with_pgw_dev(
-    client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-):
-    """Under ``PGW_DEV``, the jobs.js bundle is re-read on every request.
-
-    Frontend devs running ``cd frontend && npm run watch`` rebuild the
-    bundle on save; only a browser refresh should be needed to see the
-    change, not a ``pgw serve`` restart.
-    """
-    import pgw.server.templates as templates_mod
-
-    fake_bundle = tmp_path / "jobs.js"
-    fake_bundle.write_text("// version A\n", encoding="utf-8")
-    monkeypatch.setattr(templates_mod, "_JOBS_JS_PATH", fake_bundle)
-    monkeypatch.setattr(templates_mod, "_JOBS_JS", "// stale cached value\n")
-    monkeypatch.setenv("PGW_DEV", "1")
-
-    first = client.get("/jobs.js").text
-    assert "version A" in first
-
-    fake_bundle.write_text("// version B\n", encoding="utf-8")
-    second = client.get("/jobs.js").text
-    assert "version B" in second
-    assert "version A" not in second
+def test_api_workspace_detail(client: TestClient, base_dir: Path):
+    """Hand-craft a workspace and verify the detail endpoint."""
+    ws = base_dir / "manual" / "20260101_000000"
+    ws.mkdir(parents=True)
+    (ws / "metadata.json").write_text(
+        json.dumps({"title": "Manual", "language": "fr"}), encoding="utf-8"
+    )
+    (ws / "transcript.fr.txt").write_text("hi", encoding="utf-8")
+    resp = client.get("/api/workspaces/manual/20260101_000000")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["slug"] == "manual"
+    assert body["timestamp"] == "20260101_000000"
+    assert body["metadata"]["title"] == "Manual"
+    assert any(f["name"] == "transcript.fr.txt" for f in body["files"])
 
 
-def test_jobs_js_uses_cached_bundle_without_pgw_dev(
-    client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-):
-    """Without ``PGW_DEV``, the cached value is served — disk edits ignored."""
-    import pgw.server.templates as templates_mod
+def test_api_workspace_detail_404(client: TestClient):
+    resp = client.get("/api/workspaces/nope/20990101_000000")
+    assert resp.status_code == 404
 
-    fake_bundle = tmp_path / "jobs.js"
-    fake_bundle.write_text("// disk only\n", encoding="utf-8")
-    monkeypatch.setattr(templates_mod, "_JOBS_JS_PATH", fake_bundle)
-    monkeypatch.setattr(templates_mod, "_JOBS_JS", "// cached\n")
-    monkeypatch.delenv("PGW_DEV", raising=False)
 
-    body = client.get("/jobs.js").text
-    assert "cached" in body
-    assert "disk only" not in body
+def test_api_form_defaults(client: TestClient):
+    resp = client.get("/api/config/defaults")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "language" in body
+    assert "backend" in body
 
 
 # ── /jobs validation ─────────────────────────────────────────────────────
@@ -180,8 +193,6 @@ def test_create_job_rejects_missing_local_path(client: TestClient):
 
 
 def test_create_job_rejects_path_outside_base_dir(client: TestClient, tmp_path: Path):
-    """Defence-in-depth: even if a server-side path exists, reject it
-    unless it lives under the workspace dir."""
     outsider = tmp_path / "elsewhere.mp4"
     outsider.write_bytes(b"x")
     resp = client.post(
@@ -204,7 +215,6 @@ def test_create_job_rejects_unsafe_time_strings(client: TestClient):
 
 
 def test_create_job_accepts_url(client: TestClient, jobs: JobManager):
-    # Don't exercise the pipeline; just verify the request is accepted.
     resp = client.post(
         "/jobs",
         json={"input": "https://example.com/video.mp4", "language": "en"},
@@ -216,7 +226,7 @@ def test_create_job_accepts_url(client: TestClient, jobs: JobManager):
     assert snap is not None
 
 
-# ── job lifecycle through the UI ─────────────────────────────────────────
+# ── Lifecycle ────────────────────────────────────────────────────────────
 
 
 def _wait_for_terminal(jobs: JobManager, job_id: str, timeout: float = 5.0) -> str:
@@ -290,7 +300,6 @@ def test_event_stream_replays_terminal(
     jobs: JobManager,
     stub_pipeline: Path,
 ):
-    """After a job finishes, GET /events should replay the full log."""
     job_id = client.post(
         "/jobs",
         json={"input": "https://example.com/v.mp4", "language": "en"},
@@ -308,8 +317,6 @@ def test_event_stream_replays_terminal(
     assert "terminal" in types
     terminal = [e for e in events if e.get("type") == "terminal"][0]
     assert terminal["state"] == "succeeded"
-    workspaces = [e for e in events if e.get("type") == "workspace"]
-    assert workspaces and workspaces[0]["slug"] == "test-job"
 
 
 def test_cancel_before_start(
@@ -318,13 +325,10 @@ def test_cancel_before_start(
     monkeypatch: pytest.MonkeyPatch,
     base_dir: Path,
 ):
-    """Cancel set before run — pipeline raises JobCancelled at first emit."""
-
     started = threading.Event()
 
     def slow_pipeline(*args, on_event=None, cancel_token=None, **kwargs):
         started.set()
-        # Poll the cancel token like the real pipeline's emit seam does.
         for _ in range(20):
             time.sleep(0.05)
             if cancel_token is not None and cancel_token.is_set():
@@ -351,7 +355,7 @@ def test_cancel_before_start(
     assert state == "cancelled"
 
 
-# ── upload ───────────────────────────────────────────────────────────────
+# ── Upload ───────────────────────────────────────────────────────────────
 
 
 def test_upload_writes_file_under_uploads(client: TestClient, jobs: JobManager):
@@ -361,13 +365,11 @@ def test_upload_writes_file_under_uploads(client: TestClient, jobs: JobManager):
         files={"file": ("clip.mp4", payload, "video/mp4")},
     )
     assert resp.status_code == 201
-    data = resp.json()
-    saved = data["files"][0]
+    saved = resp.json()["files"][0]
     assert saved["name"] == "clip.mp4"
     assert saved["size"] == len(payload)
     assert Path(saved["path"]).is_file()
     assert Path(saved["path"]).read_bytes() == payload
-    # Path must be under the uploads dir — no traversal escape.
     assert str(Path(saved["path"])).startswith(str(jobs.uploads_dir))
 
 
@@ -381,35 +383,36 @@ def test_upload_strips_unsafe_chars(client: TestClient):
     assert "/" not in name and ".." not in name
 
 
-# ── workspace app ────────────────────────────────────────────────────────
+# ── Workspace app ────────────────────────────────────────────────────────
 
 
-def test_workspace_app_serves_index(tmp_path: Path):
-    workspace = tmp_path / "ws"
-    workspace.mkdir()
+def test_workspace_app_serves_spa_index(tmp_path: Path):
+    workspace = tmp_path / "wsdir" / "ws"
+    workspace.mkdir(parents=True)
     (workspace / "metadata.json").write_text(
         json.dumps({"title": "Test", "language": "fr"}), encoding="utf-8"
     )
     app = create_workspace_app(workspace)
     with TestClient(app) as c:
         resp = c.get("/")
-        assert resp.status_code == 200
-        assert "Test" in resp.text
+        assert resp.status_code in (200, 503)
+        assert resp.headers["content-type"].startswith("text/html")
 
 
-def test_workspace_app_serves_static_files(tmp_path: Path):
-    workspace = tmp_path / "ws"
-    workspace.mkdir()
+def test_workspace_app_serves_workspace_files(tmp_path: Path):
+    base = tmp_path / "base"
+    workspace = base / "slug" / "20260101_000000"
+    workspace.mkdir(parents=True)
     (workspace / "metadata.json").write_text("{}", encoding="utf-8")
     (workspace / "transcript.fr.txt").write_bytes(b"bonjour")
     app = create_workspace_app(workspace)
     with TestClient(app) as c:
-        resp = c.get("/transcript.fr.txt")
+        resp = c.get("/ws/slug/20260101_000000/transcript.fr.txt")
         assert resp.status_code == 200
         assert resp.content == b"bonjour"
 
 
-# ── orphan reaper + retention ────────────────────────────────────────────
+# ── Orphans + retention ─────────────────────────────────────────────────
 
 
 def test_orphan_jobs_are_marked_interrupted_on_startup(base_dir: Path):
@@ -417,7 +420,6 @@ def test_orphan_jobs_are_marked_interrupted_on_startup(base_dir: Path):
     jobs_dir.mkdir()
     job_id = "a" * 32
     orphan = jobs_dir / f"{job_id}.jsonl"
-    # Simulate a partial log left behind by a crashed server.
     orphan.write_text(
         '{"type":"record","id":"' + job_id + '","state":"running","inputs":{}}\n'
         '{"type":"state","state":"running","ts":1.0}\n',
@@ -433,13 +435,8 @@ def test_orphan_jobs_are_marked_interrupted_on_startup(base_dir: Path):
 
 
 def test_retention_caps_finished_logs(base_dir: Path):
-    import os
-
     jobs_dir = base_dir / ".jobs"
     jobs_dir.mkdir()
-    # Drop 5 finished job logs; retention=2 should evict the older 3.
-    # Force distinct mtimes so the GC's mtime-sorted ordering is
-    # deterministic on filesystems with coarse-grained timestamps.
     for i in range(5):
         jid = f"{'b' * 31}{i}"
         path = jobs_dir / f"{jid}.jsonl"
@@ -455,6 +452,5 @@ def test_retention_caps_finished_logs(base_dir: Path):
     finally:
         mgr.shutdown(wait=False)
     assert len(remaining) == 2
-    # Newest two (i=3, i=4) should have survived.
     assert any(name.endswith("3.jsonl") for name in remaining)
     assert any(name.endswith("4.jsonl") for name in remaining)

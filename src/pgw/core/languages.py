@@ -8,6 +8,8 @@ Reference: https://github.com/openai/whisper/blob/main/whisper/tokenizer.py
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 # fmt: off
 WHISPER_LANGUAGES: dict[str, str] = {
     "af": "afrikaans",   "am": "amharic",        "ar": "arabic",
@@ -114,3 +116,45 @@ def validate_language(code: str) -> str:
             f"Run 'pgw languages' to see all {len(WHISPER_LANGUAGES)} supported languages."
         )
     return code
+
+
+# ── Unified language registry ───────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class LanguageInfo:
+    """Single source of truth for a supported language."""
+
+    code: str
+    name: str  # Title-case English name, e.g. "French"
+    has_spacy: bool = False
+    has_alignment: bool = False
+
+
+def _build_language_list() -> list[LanguageInfo]:
+    """Build the unified language registry.
+
+    Merges Whisper language codes with spaCy model availability and
+    alignment-quality flags so consumers (CLI, API, frontend) share one
+    authoritative list.
+    """
+    try:
+        from pgw.utils.spacy import SPACY_MODELS as _SPACY
+    except ImportError:
+        _SPACY: dict[str, str] = {}  # type: ignore[no-redef]
+
+    result: list[LanguageInfo] = []
+    for code in sorted(WHISPER_LANGUAGES):
+        result.append(
+            LanguageInfo(
+                code=code,
+                name=WHISPER_LANGUAGES[code].title(),
+                has_spacy=code in _SPACY,
+                has_alignment=code in ALIGNMENT_LANGUAGES,
+            )
+        )
+    return result
+
+
+ALL_LANGUAGES: list[LanguageInfo] = _build_language_list()
+"""Complete list of supported languages with metadata flags."""

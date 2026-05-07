@@ -7,7 +7,7 @@
 # The web UI is a TypeScript bundle — the js-builder stage compiles it so
 # end users never need Node installed locally.
 
-# ── Stage 1: TypeScript / esbuild ────────────────────────────────────────
+# ── Stage 1: React SPA build (Vite) ──────────────────────────────────────
 FROM node:22-slim AS js-builder
 
 WORKDIR /frontend
@@ -17,9 +17,9 @@ COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 
 COPY frontend/ ./
-# build.mjs writes to ../src/pgw/templates/jobs.js — create the parent so
-# the COPY target in the Python builder stage finds the artifact.
-RUN mkdir -p ../src/pgw/templates && node build.mjs
+# Vite writes the bundle to ../src/pgw/templates/dist/. Pre-create the
+# parent so the COPY target in the Python builder stage finds it.
+RUN mkdir -p ../src/pgw/templates && npm run build
 
 
 # ── Stage 2: Python build ────────────────────────────────────────────────
@@ -36,9 +36,9 @@ RUN uv sync --all-extras --frozen --no-install-project
 
 COPY src/ src/
 COPY README.md ./
-# Bring in the freshly built TypeScript bundle so the Python wheel's
-# templates directory ships the latest jobs.js artifact.
-COPY --from=js-builder /src/pgw/templates/jobs.js src/pgw/templates/jobs.js
+# Bring in the freshly built React SPA so the Python wheel's templates
+# directory ships the latest dist/ tree.
+COPY --from=js-builder /src/pgw/templates/dist src/pgw/templates/dist
 
 RUN uv sync --all-extras --frozen
 

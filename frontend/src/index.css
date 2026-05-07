@@ -1,0 +1,116 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+@theme {
+  --font-sans:
+    'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+
+  --radius: 0.65rem;
+
+  /* shadcn-style design tokens, light theme */
+  --color-background: oklch(0.99 0 0);
+  --color-foreground: oklch(0.145 0 0);
+
+  --color-card: oklch(1 0 0);
+  --color-card-foreground: oklch(0.145 0 0);
+
+  --color-popover: oklch(1 0 0);
+  --color-popover-foreground: oklch(0.145 0 0);
+
+  --color-primary: oklch(0.55 0.22 264);
+  --color-primary-foreground: oklch(0.985 0 0);
+
+  --color-secondary: oklch(0.97 0 0);
+  --color-secondary-foreground: oklch(0.205 0 0);
+
+  --color-muted: oklch(0.97 0 0);
+  --color-muted-foreground: oklch(0.556 0 0);
+
+  --color-accent: oklch(0.97 0 0);
+  --color-accent-foreground: oklch(0.205 0 0);
+
+  --color-destructive: oklch(0.577 0.245 27.325);
+  --color-destructive-foreground: oklch(0.985 0 0);
+
+  --color-border: oklch(0.92 0 0);
+  --color-input: oklch(0.92 0 0);
+  --color-ring: oklch(0.55 0.22 264);
+
+  --color-success: oklch(0.62 0.15 150);
+  --color-warning: oklch(0.72 0.18 75);
+
+  --color-chart-1: oklch(0.65 0.22 264);
+  --color-chart-2: oklch(0.6 0.18 162);
+  --color-chart-3: oklch(0.72 0.15 75);
+  --color-chart-4: oklch(0.65 0.2 25);
+  --color-chart-5: oklch(0.55 0.18 320);
+}
+
+.dark {
+  --color-background: oklch(0.145 0 0);
+  --color-foreground: oklch(0.985 0 0);
+
+  --color-card: oklch(0.205 0 0);
+  --color-card-foreground: oklch(0.985 0 0);
+
+  --color-popover: oklch(0.205 0 0);
+  --color-popover-foreground: oklch(0.985 0 0);
+
+  --color-primary: oklch(0.7 0.2 264);
+  --color-primary-foreground: oklch(0.145 0 0);
+
+  --color-secondary: oklch(0.27 0 0);
+  --color-secondary-foreground: oklch(0.985 0 0);
+
+  --color-muted: oklch(0.27 0 0);
+  --color-muted-foreground: oklch(0.708 0 0);
+
+  --color-accent: oklch(0.27 0 0);
+  --color-accent-foreground: oklch(0.985 0 0);
+
+  --color-destructive: oklch(0.65 0.24 27);
+  --color-destructive-foreground: oklch(0.985 0 0);
+
+  --color-border: oklch(0.3 0 0);
+  --color-input: oklch(0.3 0 0);
+  --color-ring: oklch(0.7 0.2 264);
+
+  --color-success: oklch(0.7 0.18 150);
+  --color-warning: oklch(0.78 0.18 75);
+}
+
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--color-border);
+  }
+  body {
+    font-feature-settings: 'rlig' 1, 'calt' 1, 'ss01' 1;
+  }
+}
+
+video::cue {
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  max-inline-size: 90vw;
+}
+
+/* Smooth gradient backdrop on the library page */
+.app-gradient {
+  background:
+    radial-gradient(
+      circle at 0% 0%,
+      color-mix(in oklch, var(--color-primary) 12%, transparent),
+      transparent 50%
+    ),
+    radial-gradient(
+      circle at 100% 0%,
+      color-mix(in oklch, var(--color-chart-3) 10%, transparent),
+      transparent 50%
+    ),
+    var(--color-background);
+}

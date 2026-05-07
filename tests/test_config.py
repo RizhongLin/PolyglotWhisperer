@@ -12,7 +12,9 @@ from pgw.core.config import load_config
 
 def test_cli_overrides():
     """CLI overrides take precedence over defaults."""
-    config = load_config(**{"whisper.local_model": "medium", "whisper.language": "de"})
+    config = load_config(
+        **{"whisper.backend": "local", "whisper.local_model": "medium", "whisper.language": "de"}
+    )
     assert config.whisper.local_model == "medium"
     assert config.whisper.model == "medium"  # property returns local_model
     assert config.whisper.language == "de"

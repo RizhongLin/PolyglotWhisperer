@@ -87,9 +87,17 @@ The output MUST be a JSON object with the SAME keys ("1" through "N"), in \
 the same order, with no keys added, dropped, merged, or split.
 - These are timed subtitles — each segment is synced to audio. \
 Merging or splitting segments would break the timing.
-- An empty string ("") is acceptable for a noise-only line (e.g. "[music]", \
-crowd noise, mic feedback) — the goal is matching count, not non-empty content. \
-Prefer "" over deleting the key.
+    - An empty string ("") is acceptable for a noise-only line (e.g. "[music]", \
+crowd noise, mic feedback, untranslatable filler) — the goal is matching \
+count, not non-empty content. Prefer "" over deleting the key.
+    - Empty output should be RARE — only use it for genuine noise. \
+Do NOT produce long runs of consecutive empty entries. \
+Even brief or partial speech deserves a best-effort output.
+
+Segment-level integrity:
+    - Every input key MUST produce exactly one output key — never combine \
+two or more input segments into a single output, no matter how naturally \
+they form a sentence. This is non-negotiable timing data.
 
 What to fix:
 - ASR transcription errors (misheard words, homophone mistakes)
@@ -101,20 +109,18 @@ they carry meaning or are part of a quote
 - Missing hyphens in compound expressions (e.g. "peut être" → "peut-être")
 
 What NOT to do:
-- Do NOT translate — keep the original language
-- Do NOT rephrase, paraphrase, or rewrite — preserve the speaker's words
+- Refine ONLY the segments between the ===BEGIN=== and ===END=== markers
+- Do NOT translate — keep the original language exactly
+- Do NOT rephrase, paraphrase, or rewrite — preserve the speaker's wording
 - Do NOT add information, context, or explanation
 - Do NOT merge or split segments
 - If a line is already correct, return it unchanged
 
-Cross-segment awareness:
+Cross-segment coherence:
 - Consecutive segments are often parts of the same sentence. \
 Read them together to understand context before correcting.
 - Use context to resolve ambiguous ASR errors \
 (e.g. "mer" vs "mère" vs "maire" depends on surrounding words).
-
-Output format — a JSON object keyed by segment number:
-{{"1": "text 1", "2": "text 2", ...}}
 
 Example:
 Input: {{"1": "euh bonjour comment allez vous", \
@@ -123,12 +129,15 @@ Input: {{"1": "euh bonjour comment allez vous", \
 Output: {{"1": "Bonjour, comment allez-vous ?", \
 "2": "Je suis très content de vous voir.", \
 "3": "Merci beaucoup pour votre aide."}}
+
+Output format — a JSON object keyed by segment number:
+{{"1": "text 1", "2": "text 2", ...}}
 """
 
 REFINE_USER = """\
 Refine these {count} subtitle segments in {language}. \
 Return a JSON object with EXACTLY the keys "1" through "{count}" — \
-every key must appear, none may be added, merged, or skipped. \
+every key must appear, none may be added, merged, split, or skipped. \
 Use an empty string "" if a line is pure noise.
 
 {context}===BEGIN===
@@ -149,6 +158,14 @@ Merging segments would break the timing.
 - An empty string ("") is acceptable for a noise-only segment (e.g. "[music]", \
 crowd noise, mic feedback, untranslatable filler) — the goal is matching the \
 key count, not non-empty content. Prefer "" over dropping the key.
+- Empty output should be RARE — only use it for genuine noise. \
+Do NOT produce long runs of consecutive empty entries. \
+Even brief or partial speech deserves a best-effort translation.
+
+Segment-level integrity:
+- Every input key MUST produce exactly one output key — never combine \
+two or more input segments into a single output, no matter how naturally \
+they form a sentence. This is non-negotiable timing data.
 
 Cross-segment coherence:
 - Consecutive segments are often parts of the same sentence. \
@@ -197,7 +214,7 @@ Output format — a JSON object keyed by segment number:
 TRANSLATION_USER = """\
 Translate these {count} segments from {source_lang} to {target_lang}. \
 Return a JSON object with EXACTLY the keys "1" through "{count}" — \
-every key must appear, none may be added, merged, or skipped. \
+every key must appear, none may be added, merged, split, or skipped. \
 Use an empty string "" if a segment is pure noise.
 
 {context}===BEGIN===

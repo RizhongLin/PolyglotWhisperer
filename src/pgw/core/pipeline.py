@@ -255,22 +255,43 @@ def run_pipeline(
             segments = postprocess_segments(segments, language)
 
             if refine and config.llm.refine_enabled:
-                from pgw.llm.refine import refine_subtitles
+                if translate:
+                    from pgw.llm.combine import refine_and_translate
 
-                emit("transcribe", 0.5, "Refining transcription...")
-                stage("Refining", config.llm.model)
+                    emit("transcribe", 0.5, "Refining + translating…")
+                    stage("Refining + Translating", config.llm.model)
 
-                def _on_refine_progress(frac: float) -> None:
-                    emit("transcribe", 0.5 + frac * 0.5, f"Refining ({frac:.0%})...")
+                    def _on_combine_progress(frac: float) -> None:
+                        emit("transcribe", 0.5 + frac * 0.5, f"Processing ({frac:.0%})…")
 
-                segments = refine_subtitles(
-                    segments,
-                    language,
-                    config.llm,
-                    chunk_size=chunk_size,
-                    on_progress=_on_refine_progress,
-                )
-                llm_was_used = True
+                    combine_result = refine_and_translate(
+                        segments,
+                        language,
+                        translate,
+                        config.llm,
+                        chunk_size=chunk_size,
+                        on_progress=_on_combine_progress,
+                    )
+                    segments = combine_result.original
+                    trans_result = combine_result
+                    llm_was_used = True
+                else:
+                    from pgw.llm.refine import refine_subtitles
+
+                    emit("transcribe", 0.5, "Refining transcription…")
+                    stage("Refining", config.llm.model)
+
+                    def _on_refine_progress(frac: float) -> None:
+                        emit("transcribe", 0.5 + frac * 0.5, f"Refining ({frac:.0%})…")
+
+                    segments = refine_subtitles(
+                        segments,
+                        language,
+                        config.llm,
+                        chunk_size=chunk_size,
+                        on_progress=_on_refine_progress,
+                    )
+                    llm_was_used = True
 
             save_subtitles(segments, vtt_path, fmt="vtt")
             saved.append(vtt_path)
@@ -290,7 +311,7 @@ def run_pipeline(
     # Step 5: Optional translation
     if translate:
         trans_vtt = paths["translation_vtt"]
-        if not trans_vtt.is_file():
+        if not trans_vtt.is_file() and trans_result is None:
             from pgw.llm.translator import translate_subtitles
             from pgw.subtitles.converter import save_bilingual_vtt, save_subtitles
 

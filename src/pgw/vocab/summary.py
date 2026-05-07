@@ -57,6 +57,8 @@ def _is_learnable(token) -> bool:
     # Skip tokens containing punctuation artifacts (S.Garcia, -, etc.)
     if any(c in _ARTIFACT_CHARS for c in text):
         return False
+    if any(c.isdigit() for c in text):
+        return False
     return True
 
 

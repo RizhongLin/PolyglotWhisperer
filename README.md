@@ -107,20 +107,25 @@ Env vars use `PGW_` prefix: `PGW_WHISPER__BACKEND=api`, `PGW_LLM__API_MODEL=groq
 ## Web UI
 
 ```bash
-pgw serve                      # library + end-to-end pipeline launcher
+pgw serve                      # library + studio + player (multi-page SPA)
 pgw serve <workspace-dir>       # single-workspace player
 ```
 
-The library page lets you launch a new pipeline run from the browser — paste a URL or drop a local file, pick source language and translation target, and watch live progress. Cancel mid-run, refresh the tab without losing state, and click into the finished workspace when it's done. The player includes keyboard shortcuts (← → ↑ ↓ Space f 1-3), click-to-seek in transcript, and click-any-word to reveal difficulty + translation when vocabulary data is available.
+The web UI is a **React SPA** built from `frontend/` (Vite + TypeScript + TanStack Router/Query + Tailwind v4 + shadcn-style components). The bundle is shipped as static assets inside the Python wheel, so end users never need Node.
 
-Backend is **FastAPI + uvicorn**; frontend is a **TypeScript** bundle compiled to `src/pgw/templates/jobs.js`. Job state is persisted as append-only JSONL under `<workspace>/.jobs/`, so an in-flight job survives a browser refresh and the server's restart marks orphaned jobs as `interrupted` rather than leaving them stuck.
+Pages:
+
+- **Library** (`/library`) — workspace grid with thumbnails, language pair, difficulty, dates. Click any card to open the player.
+- **Studio** (`/studio`) — paste a URL or drop a file, pick source language + translation target, hit *Start*. Live progress cards stream events from the backend; cancel any time, close the tab and come back without losing state. Advanced flags (backends, models, chunk size, ffmpeg start/duration, refine, subs) are tucked behind a disclosure.
+- **Player** (`/library/<slug>/<ts>`) — HTML5 video, click-to-seek transcript with anticipate/linger windows, track switcher (bilingual / original / translation), vocab card (top rare words + difficulty), downloads card, re-download fallback for missing video files.
+
+Backend is **FastAPI + uvicorn** serving JSON over `/api/...` and raw workspace files over `/ws/<slug>/<ts>/<file>`. Job state is persisted as append-only JSONL under `<workspace>/.jobs/`, so an in-flight job survives a browser refresh and the server's restart marks orphaned jobs as `interrupted` rather than leaving them stuck.
 
 Knobs:
 
 - `PGW_SERVE_HOST` — bind address (default `127.0.0.1`; Docker sets `0.0.0.0`).
 - `PGW_SERVE_MAX_JOBS` — concurrent pipeline workers (default `1`, keeps Whisper warm).
 - `PGW_JOBS_RETENTION` — how many finished job logs to keep (default `200`).
-- `PGW_DEV` — when set, re-read `jobs.js` from disk on every request so frontend devs running `npm run watch` only need to refresh the browser (no `pgw serve` restart).
 
 ## Vocabulary
 
@@ -160,7 +165,7 @@ docker run --rm -it -p 8321:8321 \
   pgw serve --no-open
 ```
 
-`docker build` always rebuilds the frontend bundle from the TypeScript source via the `js-builder` stage, so you don't need Node locally to ship a Docker image. The host-side `npm run build` step is only needed when running `pgw serve` directly against your working tree (no Docker), since `pgw serve` reads the bundle that's already on disk.
+`docker build` always rebuilds the React SPA from the TypeScript source via the `js-builder` stage, so you don't need Node locally to ship a Docker image. The host-side `npm run build` step is only needed when running `pgw serve` directly against your working tree (no Docker), since `pgw serve` reads `src/pgw/templates/dist/` from disk.
 
 ## Architecture
 
@@ -173,32 +178,38 @@ src/pgw/
 ├── server/       FastAPI app (library + jobs API), JobManager, exceptions
 ├── subtitles/    Format conversion (VTT/SRT), PDF/EPUB export
 ├── transcriber/  Whisper backends (stable-ts local + API), segmentation
-├── templates/    HTML/CSS for player & library + the built jobs.js bundle
+├── templates/    Built React SPA (templates/dist/) + favicon + brand mark
 ├── utils/        Audio extraction, cache, logging, spaCy, paths
 └── vocab/        Vocabulary analysis + CEFR estimation
 
-frontend/        TypeScript source for the library page (compiles → src/pgw/templates/jobs.js)
-├── src/         types.ts, api.ts, dom.ts, jobs.ts
-├── build.mjs    esbuild driver
-└── tsconfig.json
+frontend/        React SPA source (compiles → src/pgw/templates/dist/)
+├── src/
+│   ├── routes/         TanStack Router file-based routes (library, studio, player)
+│   ├── components/ui/  shadcn-style primitives (Button, Card, Dialog, …)
+│   ├── api/            typed fetch client + wire-format types
+│   ├── lib/            cn(), VTT parser, formatters, theme hook
+│   └── main.tsx        entry: QueryClient + RouterProvider
+├── vite.config.ts
+└── tsconfig*.json
 ```
 
-Rebuild the frontend bundle after editing TypeScript:
+Build the frontend bundle:
 
 ```bash
-cd frontend && npm ci && npm run build            # → ../src/pgw/templates/jobs.js
-cd frontend && npm run typecheck                  # tsc --noEmit
-cd frontend && npm run watch                      # rebuild on save (sourcemaps inline)
+cd frontend && npm ci && npm run build            # → ../src/pgw/templates/dist/
+cd frontend && npm run typecheck                  # tsc -b
+cd frontend && npm run dev                        # Vite dev server on :5173 (proxies /api → :8321)
 ```
 
-For a tight TypeScript dev loop without restarting the Python server:
+Tight TypeScript dev loop:
 
 ```bash
-# terminal 1 — rebuild the bundle on every save
-cd frontend && npm run watch
+# terminal 1 — backend
+pgw serve --no-open --port 8321
 
-# terminal 2 — refresh the browser to pick up the new bundle
-PGW_DEV=1 pgw serve --no-open
+# terminal 2 — Vite dev server (HMR + API proxy)
+cd frontend && npm run dev
+# open http://127.0.0.1:5173
 ```
 
 ## Tech Stack
@@ -213,7 +224,7 @@ PGW_DEV=1 pgw serve --no-open
 | Export          | WeasyPrint (PDF), ebooklib (EPUB)                                |
 | CLI             | Typer + Rich                                                     |
 | Web UI backend  | FastAPI + uvicorn                                                |
-| Web UI frontend | TypeScript + esbuild (vanilla, no framework)                     |
+| Web UI frontend | React 19 + Vite + TanStack Router/Query + Tailwind v4            |
 | Playback        | mpv (CLI), browser `<video>` (web UI)                            |
 
 ## License

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en" class="h-full">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/icon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>PolyglotWhisperer</title>
+    <script>
+      // Apply persisted theme before paint to avoid a flash.
+      (() => {
+        const saved = localStorage.getItem('pgw-theme');
+        const theme = saved ?? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        document.documentElement.classList.toggle('dark', theme === 'dark');
+      })();
+    </script>
+  </head>
+  <body class="h-full bg-background text-foreground antialiased">
+    <div id="root" class="min-h-full"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,16 +1,38 @@
 {
   "name": "pgw-frontend",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "TypeScript frontend bundle for the pgw serve UI.",
   "type": "module",
+  "description": "React SPA for the pgw web UI — library, studio, player.",
   "scripts": {
-    "build": "node build.mjs",
-    "watch": "node build.mjs --watch",
-    "typecheck": "tsc --noEmit"
+    "dev": "vite",
+    "build": "vite build && tsc -b",
+    "preview": "vite preview",
+    "typecheck": "tsc -b",
+    "lint": "eslint src --max-warnings 0",
+    "openapi": "openapi-typescript http://127.0.0.1:8321/openapi.json -o src/api/schema.d.ts"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.62.0",
+    "@tanstack/react-router": "^1.95.0",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.468.0",
+    "openapi-fetch": "^0.13.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwind-merge": "^2.6.0"
   },
   "devDependencies": {
-    "esbuild": "^0.24.0",
-    "typescript": "^5.6.0"
+    "@tailwindcss/vite": "^4.0.0",
+    "@tanstack/router-plugin": "^1.95.0",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "openapi-typescript": "^7.5.2",
+    "tailwindcss": "^4.0.0",
+    "tw-animate-css": "^1.2.0",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.0"
   }
 }

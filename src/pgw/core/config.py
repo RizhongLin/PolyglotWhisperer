@@ -36,7 +36,7 @@ _PROJECT_CONFIG = Path("pgw.toml")
 class BackendConfig(BaseModel):
     """Base for configs with local/api backend selection."""
 
-    backend: str = "local"  # "local" or "api"
+    backend: str = "api"  # "local" or "api"
     local_model: str = ""
     api_model: str = ""
     api_base: str = ""  # Custom API endpoint (OpenAI-compatible server, etc.)

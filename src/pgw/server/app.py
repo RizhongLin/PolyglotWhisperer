@@ -1,79 +1,121 @@
 """FastAPI app factories for ``pgw serve``.
 
-Two ASGI apps are provided:
+Two ASGI apps:
 
-- :func:`create_library_app` — multi-workspace library browser plus the
-  end-to-end pipeline UI (``POST /jobs``, ``GET /jobs/<id>/events``, …).
-- :func:`create_workspace_app` — single-workspace player (the ``pgw serve
-  <path>`` mode), plus the "re-download missing video" SSE stream.
+- :func:`create_library_app` — multi-workspace library + end-to-end
+  pipeline launcher. Serves the React SPA (built into
+  ``src/pgw/templates/dist`` by ``frontend/``), JSON APIs the SPA
+  consumes, the jobs API, and raw workspace files at
+  ``/ws/<slug>/<ts>/<file>`` for the player ``<video>`` / ``<track>``.
+- :func:`create_workspace_app` — single-workspace mode (``pgw serve
+  <path>``). Serves the same SPA but pinned to one workspace.
 
-Both apps share the underlying static assets (HTML, CSS, JS, icons)
-loaded once at module import via ``importlib.resources``.
+The SPA does its own client-side routing via TanStack Router; the
+backend's only job is to:
+
+  1. expose JSON over /api/...
+  2. expose raw workspace blobs over /ws/<slug>/<ts>/...
+  3. serve the static SPA bundle for everything else (catch-all so a
+     deep-link refresh on /library/foo/bar still hits index.html)
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
 import uuid
+from importlib.resources import files
 from pathlib import Path
 from queue import Full
 from typing import AsyncIterator
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile, status
-from fastapi.responses import (
-    HTMLResponse,
-    Response,
-    StreamingResponse,
-)
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from starlette.responses import FileResponse
 
 from pgw.server.jobs import JobManager, JobRequest
 from pgw.server.templates import (
     _ICON_PNG,
-    _LIBRARY_CSS,
     _LOGO_PNG,
-    _PLAYER_CSS,
-    _PLAYER_JS,
     _SIBLING_PREFIX,
-    _build_html,
-    _build_library_html,
+    _discover_tracks,
     _discover_workspaces,
     _find_sibling_workspaces,
+    _load_metadata,
     _redownload_video_streaming,
-    get_jobs_js,
 )
 from pgw.utils.paths import find_video
 
+# ── Static SPA bundle ────────────────────────────────────────────────────
+# ``frontend/`` builds to ``src/pgw/templates/dist/``. The dist directory
+# may be missing in dev (before the first ``npm run build``); we tolerate
+# that and serve a helpful message.
+#
+# Set ``PGW_SPA_DIR`` to an absolute path (e.g. a host-mounted volume) to
+# override the built-in bundle — useful during Docker-based frontend dev
+# where you rebuild on the host and the container picks it up instantly:
+#
+#   cd frontend && npm run build          # host
+#   docker run … -v "$PWD/src/pgw/templates/dist:/spa" -e PGW_SPA_DIR=/spa
+_OVERRIDE_DIR = os.environ.get("PGW_SPA_DIR")
+if _OVERRIDE_DIR:
+    _DIST_PATH = Path(_OVERRIDE_DIR)
+    try:
+        _SPA_INDEX = (_DIST_PATH / "index.html").read_text(encoding="utf-8")
+        _SPA_ASSETS = _DIST_PATH / "assets"
+        _SPA_AVAILABLE = _SPA_INDEX != ""
+    except (FileNotFoundError, OSError):
+        _DIST_PATH = None  # type: ignore[assignment]
+        _SPA_INDEX = ""
+        _SPA_ASSETS = None  # type: ignore[assignment]
+        _SPA_AVAILABLE = False
+else:
+    _DIST_DIR = files("pgw.templates").joinpath("dist")
+    try:
+        _DIST_PATH = Path(str(_DIST_DIR))
+        _SPA_INDEX = (_DIST_PATH / "index.html").read_text(encoding="utf-8")
+        _SPA_ASSETS = _DIST_PATH / "assets"
+        _SPA_AVAILABLE = _SPA_INDEX != ""
+    except (FileNotFoundError, OSError):
+        _DIST_PATH = None  # type: ignore[assignment]
+        _SPA_INDEX = ""
+        _SPA_ASSETS = None  # type: ignore[assignment]
+        _SPA_AVAILABLE = False
+
+_FALLBACK_HTML = """<!doctype html>
+<html><head><meta charset="utf-8"><title>pgw — frontend not built</title>
+<style>body{font:14px/1.6 system-ui;max-width:42rem;margin:4rem auto;padding:0 1rem}
+code{background:#eee;padding:.1rem .3rem;border-radius:.25rem}</style></head>
+<body><h1>Frontend bundle not found</h1>
+<p>The React app at <code>src/pgw/templates/dist/</code> is missing.</p>
+<p>Build it with:</p>
+<pre><code>cd frontend &amp;&amp; npm install &amp;&amp; npm run build</code></pre>
+<p>The Docker image builds it automatically; this message only appears
+when running <code>pgw serve</code> directly against an unbuilt source tree.</p>
+</body></html>"""
+
 _CACHE_MAX_AGE = 86400
-_CSP_LIBRARY = (
+_CSP = (
     "default-src 'self'; "
-    "style-src 'self' https://cdn.jsdelivr.net; "
-    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "style-src 'self' 'unsafe-inline'; "
+    "script-src 'self' 'unsafe-inline'; "
     "img-src 'self' data: https:; "
     "media-src 'self'; "
-    "connect-src 'self' https://cdn.jsdelivr.net"
+    "connect-src 'self'; "
+    "font-src 'self' data:"
 )
-_CSP_WORKSPACE = _CSP_LIBRARY  # same policy for both
+_CSP_ASSETS = "default-src 'self'"
 _TS_RE = re.compile(r"^\d{8}_\d{6}$")
 _SLUG_RE = re.compile(r"^[\w-]+$")
 _JOB_ID_RE = re.compile(r"^[0-9a-f]{32}$")
-_VALID_BACKENDS = {"local", "api"}
 
 
-# ── shared helpers ───────────────────────────────────────────────────────
+# ── Helpers ──────────────────────────────────────────────────────────────
 
 
 def _input_is_safe(value: str, base_dir: Path) -> bool:
-    """Reject path traversal and arbitrary filesystem probing.
-
-    URLs (``http(s)://`` / ``ftp://``) pass straight through. Local paths
-    must resolve to an existing file under ``base_dir`` (uploads live in
-    ``base_dir/.uploads/<uuid>/``). With ``PGW_SERVE_HOST=0.0.0.0`` (the
-    Docker default), this stops network peers from probing arbitrary
-    server-side paths or coercing the pipeline into reading e.g.
-    ``/etc/passwd``.
-    """
+    """URLs pass; local paths must resolve under ``base_dir``."""
     if not value:
         return False
     if value.startswith(("http://", "https://", "ftp://")):
@@ -92,27 +134,14 @@ def _input_is_safe(value: str, base_dir: Path) -> bool:
 
 
 def _safe_filename(name: str) -> str:
-    """Strip directory components and unsafe chars from an upload filename.
-
-    Falls back to ``upload.bin`` when the input would sanitise to an empty
-    or all-underscore string (which carries no useful information for the
-    user inspecting their .uploads/ directory later).
-    """
     base = Path(name).name
     sanitised = re.sub(r"[^\w.\-]", "_", base)[:128]
-    if not sanitised or set(sanitised) == {"_"}:
+    if not sanitised or set(sanitised) == {"_"} or sanitised in (".", ".."):
         return "upload.bin"
     return sanitised
 
 
-def _html_response(content: str, csp: str = _CSP_LIBRARY) -> HTMLResponse:
-    return HTMLResponse(
-        content,
-        headers={"Content-Security-Policy": csp},
-    )
-
-
-def _png_response(data: bytes) -> Response:
+def _png(data: bytes) -> Response:
     return Response(
         data,
         media_type="image/png",
@@ -120,83 +149,160 @@ def _png_response(data: bytes) -> Response:
     )
 
 
-def _serve_workspace_file(workspace: Path, filename: str) -> FileResponse:
-    safe = Path(filename).name
-    file_path = workspace / safe
-    if not file_path.is_file():
+def _validate_ws(slug: str, timestamp: str, base_dir: Path) -> Path:
+    if not _SLUG_RE.match(slug) or not _TS_RE.match(timestamp):
         raise HTTPException(status.HTTP_404_NOT_FOUND)
-    return FileResponse(file_path)
+    workspace = base_dir / slug / timestamp
+    if not workspace.is_dir():
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    return workspace
 
 
-def _resolve_sibling(workspace: Path, file_part: str, base_dir: Path) -> Path:
-    """Resolve ``sibling:<timestamp>/<file>`` paths relative to a workspace."""
-    rest = file_part[len(_SIBLING_PREFIX) :]
-    if "/" not in rest:
-        raise HTTPException(status.HTTP_404_NOT_FOUND)
-    sibling_ts, filename = rest.split("/", 1)
-    if not _TS_RE.match(sibling_ts):
-        raise HTTPException(status.HTTP_404_NOT_FOUND)
-    safe = Path(filename).name
-    candidate = workspace.parent / sibling_ts
-    if not candidate.is_dir():
-        for sp in _find_sibling_workspaces(workspace, base_dir):
-            if sp.name == sibling_ts:
-                candidate = sp
-                break
-        else:
-            raise HTTPException(status.HTTP_404_NOT_FOUND)
-    file_path = candidate / safe
-    if not file_path.is_file():
-        raise HTTPException(status.HTTP_404_NOT_FOUND)
-    return file_path
+def _workspace_summary(ws: dict) -> dict:
+    """Convert the dict from ``_discover_workspaces`` into JSON-safe shape."""
+    return {
+        "slug": ws["slug"],
+        "timestamp": ws["timestamp"],
+        "title": ws["title"],
+        "language": ws.get("language") or None,
+        "target_language": ws.get("target_language") or None,
+        "lang_pairs": ws.get("lang_pairs", []),
+        "duration": ws.get("duration"),
+        "created_at": ws.get("created_at"),
+        "upload_date": ws.get("upload_date") or None,
+        "uploader": ws.get("uploader") or None,
+        "thumbnail": ws.get("thumbnail") or None,
+        "difficulty": ws.get("difficulty") or None,
+        "has_video": bool(ws.get("has_video")),
+    }
 
 
-# ── library app (no-arg `pgw serve`) ─────────────────────────────────────
+def _workspace_detail(workspace: Path, base_dir: Path) -> dict:
+    """Full workspace blob: metadata + tracks + downloadable files + sibling list."""
+    meta = _load_metadata(workspace)
+    siblings = _find_sibling_workspaces(workspace, base_dir)
+    tracks = _discover_tracks(workspace, sibling_paths=siblings)
+    files_index = []
+    for entry in sorted(workspace.iterdir()):
+        if not entry.is_file() or entry.name.startswith("."):
+            continue
+        try:
+            size = entry.stat().st_size
+        except OSError:
+            size = 0
+        files_index.append(
+            {
+                "name": entry.name,
+                "size": size,
+                "suffix": entry.suffix.lstrip("."),
+            }
+        )
+    video = find_video(workspace)
+    return {
+        "slug": workspace.parent.name,
+        "timestamp": workspace.name,
+        "metadata": meta,
+        "tracks": tracks,
+        "files": files_index,
+        "video": video.name if video is not None else None,
+        "siblings": [{"slug": sp.parent.name, "timestamp": sp.name} for sp in siblings],
+    }
+
+
+def _read_vocab(workspace: Path) -> dict | None:
+    for f in sorted(workspace.glob("vocabulary.*.json")):
+        try:
+            return json.loads(f.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+    return None
+
+
+def _form_defaults() -> dict:
+    """Pre-fill the Studio form with the user's pgw config."""
+    try:
+        from pgw.core.config import load_config
+
+        cfg = load_config()
+        return {
+            "language": cfg.whisper.language or "fr",
+            "translate": cfg.llm.target_language or "",
+            "backend": cfg.whisper.backend or "local",
+            "llm_backend": cfg.llm.backend or "local",
+            "whisper_model": cfg.whisper.model or "",
+            "llm_model": cfg.llm.model or "",
+        }
+    except Exception:  # noqa: BLE001 - best-effort
+        return {
+            "language": "fr",
+            "translate": "",
+            "backend": "api",
+            "llm_backend": "api",
+            "whisper_model": "",
+            "llm_model": "",
+        }
+
+
+# ── Library app ──────────────────────────────────────────────────────────
 
 
 def create_library_app(base_dir: Path, jobs: JobManager) -> FastAPI:
-    """Build the library/jobs ASGI app.
-
-    Args:
-        base_dir: Workspace directory (the ``config.workspace_dir``).
-        jobs:     Shared :class:`JobManager` — owns the worker pool, log
-                  fan-out, and persistence under ``base_dir/.jobs``.
-    """
     app = FastAPI(
         title="pgw library",
         docs_url=None,
         redoc_url=None,
-        openapi_url=None,
+        openapi_url="/openapi.json",
     )
 
-    # ── Page + assets ───────────────────────────────────────────────
-
-    @app.get("/", response_class=HTMLResponse, include_in_schema=False)
-    @app.get("/index.html", response_class=HTMLResponse, include_in_schema=False)
-    def library_index() -> HTMLResponse:
-        workspaces = _discover_workspaces(base_dir, backfill_metadata=False)
-        return _html_response(_build_library_html(workspaces))
-
-    @app.get("/library.css", include_in_schema=False)
-    def library_css() -> Response:
-        return Response(_LIBRARY_CSS, media_type="text/css; charset=utf-8")
-
-    @app.get("/jobs.js", include_in_schema=False)
-    def jobs_js() -> Response:
-        return Response(
-            get_jobs_js(),
-            media_type="application/javascript; charset=utf-8",
-        )
+    # ── Static icons (referenced by both SPA and the OS-level favicon) ──
 
     @app.get("/icon.png", include_in_schema=False)
     def icon() -> Response:
-        return _png_response(_ICON_PNG)
+        return _png(_ICON_PNG)
 
     @app.get("/logo.png", include_in_schema=False)
     def logo() -> Response:
-        return _png_response(_LOGO_PNG)
+        return _png(_LOGO_PNG)
 
-    # ── Jobs API ────────────────────────────────────────────────────
+    # ── JSON APIs the SPA consumes ──
+
+    @app.get("/api/workspaces")
+    def api_workspaces() -> dict:
+        rows = _discover_workspaces(base_dir, backfill_metadata=False)
+        return {"workspaces": [_workspace_summary(r) for r in rows]}
+
+    @app.get("/api/workspaces/{slug}/{timestamp}")
+    def api_workspace(slug: str, timestamp: str) -> dict:
+        workspace = _validate_ws(slug, timestamp, base_dir)
+        return _workspace_detail(workspace, base_dir)
+
+    @app.get("/api/workspaces/{slug}/{timestamp}/vocab")
+    def api_workspace_vocab(slug: str, timestamp: str) -> dict:
+        workspace = _validate_ws(slug, timestamp, base_dir)
+        vocab = _read_vocab(workspace)
+        if vocab is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "No vocabulary file found")
+        return vocab
+
+    @app.get("/api/config/defaults")
+    def api_form_defaults() -> dict:
+        return _form_defaults()
+
+    @app.get("/api/languages")
+    def api_languages() -> list[dict]:
+        from pgw.core.languages import ALL_LANGUAGES
+
+        return [
+            {
+                "code": li.code,
+                "name": li.name,
+                "has_spacy": li.has_spacy,
+                "has_alignment": li.has_alignment,
+            }
+            for li in ALL_LANGUAGES
+        ]
+
+    # ── Jobs API ──
 
     @app.get("/jobs")
     def list_jobs() -> dict:
@@ -268,22 +374,7 @@ def create_library_app(base_dir: Path, jobs: JobManager) -> FastAPI:
             ) from exc
         return {"files": [{"path": str(target_path), "name": safe, "size": size}]}
 
-    # ── Workspace passthrough (so /ws/<slug>/<ts>/ works in library mode) ──
-
-    @app.get("/ws/{slug}/{timestamp}", response_class=HTMLResponse, include_in_schema=False)
-    @app.get("/ws/{slug}/{timestamp}/", response_class=HTMLResponse, include_in_schema=False)
-    def workspace_index(slug: str, timestamp: str) -> HTMLResponse:
-        workspace = _validate_ws(slug, timestamp, base_dir)
-        video = find_video(workspace)
-        siblings = _find_sibling_workspaces(workspace, base_dir)
-        html = _build_html(
-            workspace,
-            video,
-            url_prefix=f"/ws/{slug}/{timestamp}",
-            sibling_paths=siblings,
-            library_url="/",
-        )
-        return _html_response(html, csp=_CSP_WORKSPACE)
+    # ── Workspace file passthrough (raw blobs the player consumes) ──
 
     @app.get("/ws/{slug}/{timestamp}/{file_part:path}", include_in_schema=False)
     def workspace_file(slug: str, timestamp: str, file_part: str) -> Response:
@@ -295,55 +386,167 @@ def create_library_app(base_dir: Path, jobs: JobManager) -> FastAPI:
         workspace = _validate_ws(slug, timestamp, base_dir)
         return _stream_redownload_response(workspace)
 
+    # ── SPA shell + assets ──
+
+    @app.get("/assets/{file_path:path}", include_in_schema=False)
+    def spa_asset(file_path: str) -> Response:
+        if _SPA_ASSETS is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND)
+        safe = Path(file_path)
+        if safe.is_absolute() or ".." in safe.parts:
+            raise HTTPException(status.HTTP_404_NOT_FOUND)
+        target = Path(str(_SPA_ASSETS)) / safe
+        if not target.is_file():
+            raise HTTPException(status.HTTP_404_NOT_FOUND)
+        return FileResponse(
+            target,
+            headers={
+                "Cache-Control": f"public, max-age={_CACHE_MAX_AGE}, immutable",
+                "Content-Security-Policy": _CSP_ASSETS,
+            },
+        )
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def spa_index(full_path: str) -> HTMLResponse:
+        # Catch-all so any SPA deep link (/library/<slug>/<ts>) refreshes
+        # cleanly. Any path that should NOT hit the SPA must be defined
+        # above this route.
+        del full_path
+        if not _SPA_AVAILABLE:
+            return HTMLResponse(
+                _FALLBACK_HTML,
+                status_code=503,
+                headers={"Content-Security-Policy": _CSP},
+            )
+        return HTMLResponse(_SPA_INDEX, headers={"Content-Security-Policy": _CSP})
+
     return app
 
 
-# ── workspace app (`pgw serve <path>`) ───────────────────────────────────
+# ── Workspace app (`pgw serve <path>`) ───────────────────────────────────
 
 
 def create_workspace_app(workspace: Path) -> FastAPI:
+    """Serve a single workspace via the same React SPA, pinned to one path.
+
+    The SPA still sees a "library" of size 1 — simpler than maintaining a
+    parallel UI for the single-workspace case.
+    """
     app = FastAPI(
         title="pgw workspace",
         docs_url=None,
         redoc_url=None,
-        openapi_url=None,
+        openapi_url="/openapi.json",
     )
-
-    @app.get("/", response_class=HTMLResponse, include_in_schema=False)
-    @app.get("/index.html", response_class=HTMLResponse, include_in_schema=False)
-    def workspace_index() -> HTMLResponse:
-        video = find_video(workspace)
-        return _html_response(_build_html(workspace, video), csp=_CSP_WORKSPACE)
-
-    @app.get("/player.css", include_in_schema=False)
-    def player_css() -> Response:
-        return Response(_PLAYER_CSS, media_type="text/css; charset=utf-8")
-
-    @app.get("/player.js", include_in_schema=False)
-    def player_js() -> Response:
-        return Response(
-            _PLAYER_JS,
-            media_type="application/javascript; charset=utf-8",
-        )
+    base_dir = workspace.parent.parent
+    slug = workspace.parent.name
+    ts = workspace.name
 
     @app.get("/icon.png", include_in_schema=False)
     def icon() -> Response:
-        return _png_response(_ICON_PNG)
+        return _png(_ICON_PNG)
 
     @app.get("/logo.png", include_in_schema=False)
     def logo() -> Response:
-        return _png_response(_LOGO_PNG)
+        return _png(_LOGO_PNG)
 
-    @app.post("/redownload", include_in_schema=False)
-    def redownload() -> StreamingResponse:
+    @app.get("/api/workspaces")
+    def api_workspaces() -> dict:
+        meta = _load_metadata(workspace)
+        return {
+            "workspaces": [
+                _workspace_summary(
+                    {
+                        "slug": slug,
+                        "timestamp": ts,
+                        "title": meta.get("title", slug),
+                        "language": meta.get("language", ""),
+                        "target_language": meta.get("target_language", ""),
+                        "duration": meta.get("source_duration"),
+                        "created_at": meta.get("created_at", ""),
+                        "has_video": find_video(workspace) is not None,
+                        "upload_date": meta.get("upload_date", ""),
+                        "uploader": meta.get("uploader", ""),
+                        "thumbnail": meta.get("thumbnail", ""),
+                        "lang_pairs": [(meta.get("language", ""), meta.get("target_language", ""))],
+                    }
+                )
+            ]
+        }
+
+    @app.get("/api/workspaces/{request_slug}/{request_ts}")
+    def api_workspace(request_slug: str, request_ts: str) -> dict:
+        if request_slug != slug or request_ts != ts:
+            raise HTTPException(status.HTTP_404_NOT_FOUND)
+        return _workspace_detail(workspace, base_dir)
+
+    @app.get("/api/workspaces/{request_slug}/{request_ts}/vocab")
+    def api_workspace_vocab(request_slug: str, request_ts: str) -> dict:
+        if request_slug != slug or request_ts != ts:
+            raise HTTPException(status.HTTP_404_NOT_FOUND)
+        vocab = _read_vocab(workspace)
+        if vocab is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "No vocabulary file found")
+        return vocab
+
+    @app.get("/api/config/defaults")
+    def api_form_defaults() -> dict:
+        return _form_defaults()
+
+    @app.get("/api/languages")
+    def api_languages() -> list[dict]:
+        from pgw.core.languages import ALL_LANGUAGES
+
+        return [
+            {
+                "code": li.code,
+                "name": li.name,
+                "has_spacy": li.has_spacy,
+                "has_alignment": li.has_alignment,
+            }
+            for li in ALL_LANGUAGES
+        ]
+
+    @app.post("/ws/{request_slug}/{request_ts}/redownload", include_in_schema=False)
+    def redownload(request_slug: str, request_ts: str) -> StreamingResponse:
+        if request_slug != slug or request_ts != ts:
+            raise HTTPException(status.HTTP_404_NOT_FOUND)
         return _stream_redownload_response(workspace)
 
-    @app.get("/{filename:path}", include_in_schema=False)
-    def workspace_asset(filename: str) -> Response:
-        if filename in {"index.html", "player.css", "player.js", "icon.png", "logo.png"}:
-            # Already routed above; keep this catch-all for normal files.
+    @app.get("/ws/{request_slug}/{request_ts}/{file_part:path}", include_in_schema=False)
+    def workspace_file(request_slug: str, request_ts: str, file_part: str) -> Response:
+        if request_slug != slug or request_ts != ts:
             raise HTTPException(status.HTTP_404_NOT_FOUND)
-        return _serve_workspace_file(workspace, filename)
+        return _resolve_workspace_asset(workspace, file_part, base_dir)
+
+    @app.get("/assets/{file_path:path}", include_in_schema=False)
+    def spa_asset(file_path: str) -> Response:
+        if _SPA_ASSETS is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND)
+        safe = Path(file_path)
+        if safe.is_absolute() or ".." in safe.parts:
+            raise HTTPException(status.HTTP_404_NOT_FOUND)
+        target = Path(str(_SPA_ASSETS)) / safe
+        if not target.is_file():
+            raise HTTPException(status.HTTP_404_NOT_FOUND)
+        return FileResponse(
+            target,
+            headers={
+                "Cache-Control": f"public, max-age={_CACHE_MAX_AGE}, immutable",
+                "Content-Security-Policy": _CSP_ASSETS,
+            },
+        )
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def spa_index(full_path: str) -> HTMLResponse:
+        del full_path
+        if not _SPA_AVAILABLE:
+            return HTMLResponse(
+                _FALLBACK_HTML,
+                status_code=503,
+                headers={"Content-Security-Policy": _CSP},
+            )
+        return HTMLResponse(_SPA_INDEX, headers={"Content-Security-Policy": _CSP})
 
     return app
 
@@ -351,51 +554,41 @@ def create_workspace_app(workspace: Path) -> FastAPI:
 # ── shared internals ─────────────────────────────────────────────────────
 
 
-def _validate_ws(slug: str, timestamp: str, base_dir: Path) -> Path:
-    if not _SLUG_RE.match(slug) or not _TS_RE.match(timestamp):
-        raise HTTPException(status.HTTP_404_NOT_FOUND)
-    workspace = base_dir / slug / timestamp
-    if not workspace.is_dir():
-        raise HTTPException(status.HTTP_404_NOT_FOUND)
-    return workspace
-
-
 def _resolve_workspace_asset(workspace: Path, file_part: str, base_dir: Path) -> Response:
     file_part = file_part.rstrip("/")
-    if file_part == "" or file_part == "index.html":
-        slug = workspace.parent.name
-        timestamp = workspace.name
-        video = find_video(workspace)
-        siblings = _find_sibling_workspaces(workspace, base_dir)
-        html = _build_html(
-            workspace,
-            video,
-            url_prefix=f"/ws/{slug}/{timestamp}",
-            sibling_paths=siblings,
-            library_url="/",
-        )
-        return _html_response(html, csp=_CSP_WORKSPACE)
-    if file_part == "player.css":
-        return Response(_PLAYER_CSS, media_type="text/css; charset=utf-8")
-    if file_part == "player.js":
-        return Response(_PLAYER_JS, media_type="application/javascript; charset=utf-8")
-    if file_part == "icon.png":
-        return _png_response(_ICON_PNG)
-    if file_part == "logo.png":
-        return _png_response(_LOGO_PNG)
     if file_part.startswith(_SIBLING_PREFIX):
-        sibling_path = _resolve_sibling(workspace, file_part, base_dir)
-        return FileResponse(sibling_path)
-    return _serve_workspace_file(workspace, file_part)
+        return FileResponse(_resolve_sibling(workspace, file_part, base_dir))
+    safe = Path(file_part).name
+    file_path = workspace / safe
+    if not file_path.is_file():
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    return FileResponse(file_path)
+
+
+def _resolve_sibling(workspace: Path, file_part: str, base_dir: Path) -> Path:
+    rest = file_part[len(_SIBLING_PREFIX) :]
+    if "/" not in rest:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    sibling_ts, filename = rest.split("/", 1)
+    if not _TS_RE.match(sibling_ts):
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    safe = Path(filename).name
+    candidate = workspace.parent / sibling_ts
+    if not candidate.is_dir():
+        for sp in _find_sibling_workspaces(workspace, base_dir):
+            if sp.name == sibling_ts:
+                candidate = sp
+                break
+        else:
+            raise HTTPException(status.HTTP_404_NOT_FOUND)
+    file_path = candidate / safe
+    if not file_path.is_file():
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    return file_path
 
 
 def _stream_redownload_response(workspace: Path) -> StreamingResponse:
-    """Bridge the existing sync ``send_event(str)`` callback to NDJSON.
-
-    Worker exceptions are forwarded to the client as a final
-    ``{"status":"error", "detail":...}`` line so the UI can surface
-    re-download failures rather than seeing a clean EOS.
-    """
+    _MAX_IDLE_HEARTBEATS = 60  # 15 min at 15s intervals
 
     async def iterator() -> AsyncIterator[bytes]:
         import asyncio
@@ -407,7 +600,7 @@ def _stream_redownload_response(workspace: Path) -> StreamingResponse:
 
         def send(line: str) -> None:
             try:
-                q.put_nowait(line)
+                q.put(line, timeout=0.5)
             except Full:
                 pass
 
@@ -417,14 +610,27 @@ def _stream_redownload_response(workspace: Path) -> StreamingResponse:
             except Exception as exc:  # noqa: BLE001 - surface to client
                 error_holder["msg"] = str(exc) or repr(exc)
             finally:
-                q.put_nowait(None)
+                try:
+                    q.put(None, timeout=1.0)
+                except Full:
+                    pass
 
         threading.Thread(target=worker, daemon=True).start()
         loop = asyncio.get_running_loop()
+        idle_count = 0
         while True:
             try:
                 item = await loop.run_in_executor(None, q.get, True, 15)
             except Empty:
+                idle_count += 1
+                if idle_count > _MAX_IDLE_HEARTBEATS:
+                    yield (
+                        json.dumps(
+                            {"status": "error", "detail": "Download timed out — worker stalled"}
+                        )
+                        + "\n"
+                    ).encode("utf-8")
+                    break
                 yield b"\n"
                 continue
             if item is None:
@@ -433,6 +639,7 @@ def _stream_redownload_response(workspace: Path) -> StreamingResponse:
                         json.dumps({"status": "error", "detail": error_holder["msg"]}) + "\n"
                     ).encode("utf-8")
                 break
+            idle_count = 0
             yield (item + "\n").encode("utf-8")
 
     return StreamingResponse(
