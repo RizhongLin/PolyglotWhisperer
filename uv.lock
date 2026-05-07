@@ -1148,10 +1148,12 @@ dev = [
     { name = "black" },
     { name = "fastapi" },
     { name = "httpx" },
+    { name = "openai" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "python-multipart" },
     { name = "ruff" },
+    { name = "tenacity" },
     { name = "uvicorn" },
 ]
 download = [
@@ -1193,7 +1195,7 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
     { name = "openai", marker = "extra == 'llm'", specifier = ">=1.0" },
     { name = "pgw", extras = ["nlp"], marker = "extra == 'vocab'" },
-    { name = "pgw", extras = ["serve"], marker = "extra == 'dev'" },
+    { name = "pgw", extras = ["serve", "llm"], marker = "extra == 'dev'" },
     { name = "pgw", extras = ["transcribe", "download", "llm", "nlp", "vocab", "export", "serve"], marker = "extra == 'all'" },
     { name = "pip", marker = "extra == 'nlp'" },
     { name = "pydantic", specifier = ">=2.0" },
