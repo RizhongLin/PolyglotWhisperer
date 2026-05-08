@@ -30,6 +30,7 @@ import type { PlayerAdapter } from '@/components/player/PlayerAdapter';
 import { UnavailablePlayer } from '@/components/player/UnavailablePlayer';
 import { VimeoPlayer } from '@/components/player/VimeoPlayer';
 import { YoutubePlayer } from '@/components/player/YoutubePlayer';
+import { AddCardModal } from '@/components/review/AddCardModal';
 import { api } from '@/api/client';
 import type { SubtitleTrack, VocabSummary, VocabWord, WorkspaceDetail } from '@/api/types';
 import { cn } from '@/lib/cn';
@@ -107,6 +108,15 @@ function PlayerLayout({ detail, vocab, slug, ts }: LayoutProps) {
   const [cues, setCues] = useState<VttCue[]>([]);
   const [ttLoading, setTtLoading] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
+
+  // Flashcard creation seed — populated when the user clicks "Save"
+  // on a vocab popover. The modal renders only while this is non-null.
+  const [addCardSeed, setAddCardSeed] = useState<{
+    front: string;
+    back: string;
+    audioStartMs?: number;
+    audioEndMs?: number;
+  } | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const adapterRef = useRef<PlayerAdapter | null>(null);
@@ -471,6 +481,11 @@ function PlayerLayout({ detail, vocab, slug, ts }: LayoutProps) {
             currentTime={currentTime}
             onSeek={seekTo}
             vocab={vocab}
+            onSaveFlashcard={
+              detail.id != null
+                ? (seed) => setAddCardSeed(seed)
+                : undefined
+            }
           />
         </div>
 
@@ -492,6 +507,18 @@ function PlayerLayout({ detail, vocab, slug, ts }: LayoutProps) {
           ) : null}
         </div>
       </div>
+      {detail.id != null && addCardSeed ? (
+        <AddCardModal
+          workspaceId={detail.id}
+          language={meta.language ?? 'fr'}
+          initialFront={addCardSeed.front}
+          initialBack={addCardSeed.back}
+          initialAudioStartMs={addCardSeed.audioStartMs}
+          initialAudioEndMs={addCardSeed.audioEndMs}
+          open={true}
+          onClose={() => setAddCardSeed(null)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -512,6 +539,7 @@ function Transcript({
   currentTime,
   onSeek,
   vocab,
+  onSaveFlashcard,
 }: {
   cues: VttCue[];
   activeTrack: SubtitleTrack | null;
@@ -519,6 +547,12 @@ function Transcript({
   currentTime: number;
   onSeek: (s: number) => void;
   vocab: VocabSummary | null;
+  onSaveFlashcard?: (seed: {
+    front: string;
+    back: string;
+    audioStartMs?: number;
+    audioEndMs?: number;
+  }) => void;
 }) {
   const isBilingual =
     activeTrack?.label.toLowerCase().includes('bilingual') ?? false;
@@ -542,6 +576,9 @@ function Transcript({
     level: string;
     translation?: string;
     context?: string;
+    /** Cue start (seconds) the click came from — used to seed audio range. */
+    cueStart: number;
+    cueEnd: number;
     x: number;
     y: number;
   } | null>(null);
@@ -650,11 +687,14 @@ function Transcript({
     }
     const info = word && word.length >= 3 ? wordMap.get(word) : undefined;
     if (info) {
+      const item = displayItems[i]!;
       setPopover({
         word: info.word,
         level: info.difficulty ?? (vocab?.estimated_difficulty ?? '?'),
         translation: info.translation,
         context: info.context,
+        cueStart: item.start,
+        cueEnd: item.end,
         x: e.clientX,
         y: e.clientY,
       });
@@ -699,8 +739,9 @@ function Transcript({
       </span>
       {popover ? (
         <div
-          className="fixed z-50 max-w-[260px] rounded-lg border bg-card p-3 text-sm leading-relaxed shadow-lg pointer-events-none"
+          className="fixed z-50 max-w-[260px] rounded-lg border bg-card p-3 text-sm leading-relaxed shadow-lg"
           style={{ left: Math.min(popover.x, window.innerWidth - 270), top: popover.y + 8 }}
+          onClick={(e) => e.stopPropagation()}
         >
           <div className="font-semibold text-base">{popover.word}</div>
           <span
@@ -714,6 +755,24 @@ function Transcript({
           ) : null}
           {popover.context ? (
             <div className="mt-1 text-xs text-muted-foreground">{popover.context}</div>
+          ) : null}
+          {onSaveFlashcard ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onSaveFlashcard({
+                  front: popover.word,
+                  back: popover.translation ?? '',
+                  audioStartMs: Math.floor(popover.cueStart * 1000),
+                  audioEndMs: Math.floor(popover.cueEnd * 1000),
+                });
+                setPopover(null);
+              }}
+              className="mt-2 w-full rounded-md border bg-background px-2 py-1 text-xs font-medium hover:bg-accent"
+            >
+              Save flashcard
+            </button>
           ) : null}
         </div>
       ) : null}

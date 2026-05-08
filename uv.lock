@@ -493,6 +493,15 @@ woff = [
 ]
 
 [[package]]
+name = "fsrs"
+version = "5.1.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ae/9f/3dd4e95a381f1ff57ff7977cb43001c5f0a162a5082453639b0d0324101e/fsrs-5.1.3.tar.gz", hash = "sha256:cfbf178ace3adee7d45b4a755bef17df9c0161b8aea249e86506492123d5dbb7", size = 24553, upload-time = "2025-03-29T17:16:26.449Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2b/14/a82ec7f5129568248429e3e81c8cba93d2e535408068913c6611b8e4da30/fsrs-5.1.3-py3-none-any.whl", hash = "sha256:242616570261d79318b3a9af22de93e97806b9813cc7194c2a0d844959d36726", size = 17486, upload-time = "2025-03-29T17:16:25.407Z" },
+]
+
+[[package]]
 name = "fsspec"
 version = "2026.2.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1252,6 +1261,7 @@ all = [
     { name = "ebooklib" },
     { name = "email-validator" },
     { name = "fastapi" },
+    { name = "fsrs" },
     { name = "itsdangerous" },
     { name = "openai" },
     { name = "pip" },
@@ -1296,6 +1306,7 @@ serve = [
     { name = "argon2-cffi" },
     { name = "email-validator" },
     { name = "fastapi" },
+    { name = "fsrs" },
     { name = "itsdangerous" },
     { name = "psycopg", extra = ["binary"] },
     { name = "python-multipart" },
@@ -1322,6 +1333,7 @@ requires-dist = [
     { name = "ebooklib", marker = "extra == 'export'", specifier = ">=0.18" },
     { name = "email-validator", marker = "extra == 'serve'", specifier = ">=2" },
     { name = "fastapi", marker = "extra == 'serve'", specifier = ">=0.115" },
+    { name = "fsrs", marker = "extra == 'serve'", specifier = ">=5.0,<6" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
     { name = "itsdangerous", marker = "extra == 'serve'", specifier = ">=2.2" },
     { name = "openai", marker = "extra == 'llm'", specifier = ">=1.0" },

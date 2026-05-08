@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as StudioRouteImport } from './routes/studio'
 import { Route as SetupRouteImport } from './routes/setup'
+import { Route as ReviewRouteImport } from './routes/review'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as LibraryRouteImport } from './routes/library'
 import { Route as IndexRouteImport } from './routes/index'
@@ -25,6 +26,11 @@ const StudioRoute = StudioRouteImport.update({
 const SetupRoute = SetupRouteImport.update({
   id: '/setup',
   path: '/setup',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReviewRoute = ReviewRouteImport.update({
+  id: '/review',
+  path: '/review',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
@@ -57,6 +63,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/library': typeof LibraryRouteWithChildren
   '/login': typeof LoginRoute
+  '/review': typeof ReviewRoute
   '/setup': typeof SetupRoute
   '/studio': typeof StudioRoute
   '/library/': typeof LibraryIndexRoute
@@ -65,6 +72,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/review': typeof ReviewRoute
   '/setup': typeof SetupRoute
   '/studio': typeof StudioRoute
   '/library': typeof LibraryIndexRoute
@@ -75,6 +83,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/library': typeof LibraryRouteWithChildren
   '/login': typeof LoginRoute
+  '/review': typeof ReviewRoute
   '/setup': typeof SetupRoute
   '/studio': typeof StudioRoute
   '/library/': typeof LibraryIndexRoute
@@ -86,17 +95,26 @@ export interface FileRouteTypes {
     | '/'
     | '/library'
     | '/login'
+    | '/review'
     | '/setup'
     | '/studio'
     | '/library/'
     | '/library/$slug/$ts'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login' | '/setup' | '/studio' | '/library' | '/library/$slug/$ts'
+  to:
+    | '/'
+    | '/login'
+    | '/review'
+    | '/setup'
+    | '/studio'
+    | '/library'
+    | '/library/$slug/$ts'
   id:
     | '__root__'
     | '/'
     | '/library'
     | '/login'
+    | '/review'
     | '/setup'
     | '/studio'
     | '/library/'
@@ -107,6 +125,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LibraryRoute: typeof LibraryRouteWithChildren
   LoginRoute: typeof LoginRoute
+  ReviewRoute: typeof ReviewRoute
   SetupRoute: typeof SetupRoute
   StudioRoute: typeof StudioRoute
 }
@@ -125,6 +144,13 @@ declare module '@tanstack/react-router' {
       path: '/setup'
       fullPath: '/setup'
       preLoaderRoute: typeof SetupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/review': {
+      id: '/review'
+      path: '/review'
+      fullPath: '/review'
+      preLoaderRoute: typeof ReviewRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login': {
@@ -182,6 +208,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LibraryRoute: LibraryRouteWithChildren,
   LoginRoute: LoginRoute,
+  ReviewRoute: ReviewRoute,
   SetupRoute: SetupRoute,
   StudioRoute: StudioRoute,
 }

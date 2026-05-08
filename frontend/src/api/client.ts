@@ -1,6 +1,9 @@
 import type {
   AuthState,
+  CreateFlashcardRequest,
+  FlashcardResponse,
   FormDefaults,
+  FsrsRating,
   JobEvent,
   JobInputs,
   JobRecord,
@@ -177,6 +180,37 @@ export const api = {
       `/api/workspaces/${encodeURIComponent(slug)}/${encodeURIComponent(ts)}/embed-blocked`,
       { method: 'POST' },
     ),
+
+  audioClipUrl: (slug: string, ts: string, startMs: number, endMs: number) =>
+    `/api/workspaces/${encodeURIComponent(slug)}/${encodeURIComponent(ts)}/audio-clip` +
+    `?start=${Math.max(0, Math.floor(startMs))}&end=${Math.max(0, Math.floor(endMs))}`,
+
+  // ── Flashcards ──
+
+  createFlashcard: (payload: CreateFlashcardRequest) =>
+    request<FlashcardResponse>('/api/flashcards', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+
+  flashcards: (workspaceId?: number) => {
+    const qs = workspaceId !== undefined ? `?workspace_id=${workspaceId}` : '';
+    return request<FlashcardResponse[]>(`/api/flashcards${qs}`);
+  },
+
+  flashcardQueue: (limit = 20) =>
+    request<FlashcardResponse[]>(`/api/flashcards/queue?limit=${limit}`),
+
+  reviewFlashcard: (id: number, rating: FsrsRating, elapsedMs?: number) =>
+    request<FlashcardResponse>(`/api/flashcards/${id}/review`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rating, ...(elapsedMs != null ? { elapsed_ms: elapsedMs } : {}) }),
+    }),
+
+  deleteFlashcard: (id: number) =>
+    request<void>(`/api/flashcards/${id}`, { method: 'DELETE' }),
 
   formDefaults: () => request<FormDefaults>('/api/config/defaults'),
 

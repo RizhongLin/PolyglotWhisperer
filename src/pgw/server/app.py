@@ -227,6 +227,59 @@ def _workspace_detail(workspace: Path, base_dir: Path) -> dict:
     }
 
 
+def _upsert_workspace_row(
+    db,
+    *,
+    owner_id: int | None,
+    slug: str,
+    timestamp: str,
+    fs_path: Path,
+) -> int | None:
+    """Find-or-create a Workspace row keyed on (owner, slug, timestamp).
+
+    Returns the row's id, or ``None`` when ``owner_id`` is missing
+    (e.g. bootstrap-mode access before an admin exists). Idempotent —
+    re-running on an existing row is a single SELECT.
+    """
+    if owner_id is None:
+        return None
+    from sqlalchemy import select
+
+    from pgw.db.models.workspace import Workspace
+
+    existing = db.scalar(
+        select(Workspace).where(
+            Workspace.owner_id == owner_id,
+            Workspace.slug == slug,
+            Workspace.timestamp == timestamp,
+        )
+    )
+    if existing is not None:
+        return existing.id
+    meta = _load_metadata(fs_path)
+    row = Workspace(
+        owner_id=owner_id,
+        slug=slug,
+        timestamp=timestamp,
+        title=str(meta.get("title") or slug),
+        source_url=meta.get("source_url"),
+        source_language=meta.get("language") or None,
+        target_language=meta.get("target_language") or None,
+        duration_seconds=meta.get("source_duration"),
+        fs_path=str(fs_path),
+        metadata_json={
+            "uploader": meta.get("uploader"),
+            "thumbnail": meta.get("thumbnail"),
+            "upload_date": meta.get("upload_date"),
+            "difficulty": meta.get("difficulty"),
+        },
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row.id
+
+
 def _mark_workspace_embed_blocked(workspace: Path) -> None:
     """Persist ``embed_blocked: true`` to the workspace metadata.json.
 
@@ -427,12 +480,14 @@ def create_library_app(base_dir: Path, jobs: JobManager) -> FastAPI:
     # Mount auth + setup endpoints first so they're discoverable
     # even before the rest of the app initialises.
     from pgw.server.routes.auth import router as auth_router
+    from pgw.server.routes.flashcards import router as flashcards_router
     from pgw.server.routes.workers import router as workers_router
     from pgw.server.routes.workers import ws_router as worker_ws_router
 
     app.include_router(auth_router)
     app.include_router(workers_router)
     app.include_router(worker_ws_router)
+    app.include_router(flashcards_router)
 
     # ── Static icons (referenced by both SPA and the OS-level favicon) ──
 
@@ -452,9 +507,31 @@ def create_library_app(base_dir: Path, jobs: JobManager) -> FastAPI:
         return {"workspaces": [_workspace_summary(r) for r in rows]}
 
     @app.get("/api/workspaces/{slug}/{timestamp}")
-    def api_workspace(slug: str, timestamp: str) -> dict:
+    def api_workspace(
+        slug: str,
+        timestamp: str,
+        user=Depends(current_user_or_bootstrap),
+    ) -> dict:
         workspace = _validate_ws(slug, timestamp, base_dir)
-        return _workspace_detail(workspace, base_dir)
+        detail = _workspace_detail(workspace, base_dir)
+        # Lazy-upsert a DB row for this filesystem workspace so
+        # downstream features that need a workspace_id (P6 flashcards,
+        # P5 vocab KB) work without a separate backfill step. Owner is
+        # the current user — single-user installs see one owner; the
+        # backfill CLI can re-attribute later if a multi-user system
+        # imports a single-user pgw_workspace tree.
+        from pgw.db.session import SessionLocal
+
+        try:
+            with SessionLocal() as db:
+                row_id = _upsert_workspace_row(
+                    db, owner_id=user.id, slug=slug, timestamp=timestamp, fs_path=workspace
+                )
+            detail["id"] = row_id
+        except Exception:  # noqa: BLE001 — detail still works without id
+            logger.exception("workspace upsert failed (non-fatal)")
+            detail["id"] = None
+        return detail
 
     @app.get("/api/workspaces/{slug}/{timestamp}/vocab")
     def api_workspace_vocab(slug: str, timestamp: str) -> dict:
@@ -463,6 +540,40 @@ def create_library_app(base_dir: Path, jobs: JobManager) -> FastAPI:
         if vocab is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "No vocabulary file found")
         return vocab
+
+    @app.get("/api/workspaces/{slug}/{timestamp}/audio-clip")
+    def api_workspace_audio_clip(
+        slug: str,
+        timestamp: str,
+        start: int = 0,
+        end: int = 0,
+        _user=Depends(current_user_or_bootstrap),
+    ) -> FileResponse:
+        """Return an MP3 cut of the workspace audio in ``[start_ms, end_ms)``.
+
+        Auth-gated — the underlying audio is user-owned and
+        ``current_user_or_bootstrap`` matches the rest of the workspace
+        surface. Cached on disk under ``<workspace>/.cache/clips/``
+        keyed by the source's size+mtime + range; the path encodes the
+        range so HTTP caches can store it aggressively.
+        """
+        from pgw.audio.clips import cut_clip
+
+        workspace = _validate_ws(slug, timestamp, base_dir)
+        try:
+            clip_path = cut_clip(workspace, start_ms=start, end_ms=end)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            logger.exception("audio clip extraction failed")
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return FileResponse(
+            clip_path,
+            media_type="audio/mpeg",
+            headers={"Cache-Control": "public, max-age=604800"},
+        )
 
     @app.post(
         "/api/workspaces/{slug}/{timestamp}/embed-blocked",

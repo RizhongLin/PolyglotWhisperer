@@ -51,6 +51,10 @@ serve = [
     "itsdangerous>=2.2",
     "email-validator>=2",
     "websockets>=12,<14",
+    # P6 spaced-repetition. Pinned <6 to keep the v5 ``Card``/``Rating``
+    # API stable; v6+ changes default parameters in ways we'd want to
+    # opt into deliberately.
+    "fsrs>=5.0,<6",
 ]
 all = [
     "pgw[transcribe,download,llm,nlp,vocab,export,serve]",

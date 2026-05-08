@@ -68,12 +68,46 @@ export interface EmbedTarget {
 export interface WorkspaceDetail {
   slug: string;
   timestamp: string;
+  /** DB id, populated lazily by the detail endpoint. May be null if the
+   * upsert fails (e.g. bootstrap-mode pre-admin). Flashcard creation
+   * needs this. */
+  id: number | null;
   metadata: WorkspaceMeta;
   tracks: SubtitleTrack[];
   files: WorkspaceFile[];
   video: string | null;
   embed: EmbedTarget | null;
   siblings: Array<{ slug: string; timestamp: string }>;
+}
+
+export type FsrsRating = 1 | 2 | 3 | 4;
+
+export interface FlashcardResponse {
+  id: number;
+  workspace_id: number;
+  workspace_slug: string;
+  workspace_timestamp: string;
+  vocab_entry_id: number | null;
+  front: string;
+  back: string;
+  language: string;
+  audio_start_ms: number | null;
+  audio_end_ms: number | null;
+  fsrs_due: string;
+  fsrs_stability: number;
+  fsrs_difficulty: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateFlashcardRequest {
+  workspace_id: number;
+  front: string;
+  back: string;
+  language: string;
+  audio_start_ms?: number;
+  audio_end_ms?: number;
+  vocab_entry_id?: number;
 }
 
 export interface VocabWord {

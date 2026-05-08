@@ -8,6 +8,7 @@ import { cn } from '@/lib/cn';
 const NAV = [
   { to: '/library', label: 'Library' },
   { to: '/studio', label: 'Studio' },
+  { to: '/review', label: 'Review' },
 ] as const;
 
 export function Header() {

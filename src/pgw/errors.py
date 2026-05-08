@@ -67,6 +67,13 @@ class Err:
     JOB_NOT_FOUND: Final = "job.not_found"
     JOB_INPUT_REJECTED: Final = "job.input_rejected"
 
+    # ── Workspaces ──
+    WORKSPACE_NOT_FOUND: Final = "workspace.not_found"
+
+    # ── Flashcards ──
+    FLASHCARD_NOT_FOUND: Final = "flashcard.not_found"
+    FLASHCARD_INVALID_AUDIO_RANGE: Final = "flashcard.invalid_audio_range"
+
 
 def envelope(code: str, message: str) -> dict[str, str]:
     """Standard ``HTTPException(detail=...)`` payload.
