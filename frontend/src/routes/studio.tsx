@@ -1,58 +1,29 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, createFileRoute } from '@tanstack/react-router';
+import { createFileRoute } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import {
-  Activity,
-  CheckCircle2,
   ChevronRight,
   Loader2,
   Play,
   Sparkles,
   TriangleAlert,
   Upload,
-  X,
 } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
 import { Button, buttonClass } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Progress } from '@/components/ui/progress';
 import { Select } from '@/components/ui/select';
-import { ApiError, api, openJobStream } from '@/api/client';
-import type { FormDefaults, JobEvent, JobInputs, JobRecord, JobState } from '@/api/types';
+import { JobsStrip, TERMINAL_STATES } from '@/components/studio/JobsStrip';
+import { WorkerSelect } from '@/components/studio/WorkerSelect';
+import { ApiError, api } from '@/api/client';
+import type { FormDefaults, JobInputs, JobRecord } from '@/api/types';
 import { cn } from '@/lib/cn';
-import { formatStage } from '@/lib/format';
 
 export const Route = createFileRoute('/studio')({
   component: StudioPage,
 });
-
-const STATE_LABEL: Record<JobState, string> = {
-  pending: 'Queued',
-  running: 'Running',
-  cancelling: 'Cancelling…',
-  cancelled: 'Cancelled',
-  succeeded: 'Done',
-  failed: 'Failed',
-  interrupted: 'Interrupted',
-};
-const STATE_BADGE: Record<JobState, 'default' | 'secondary' | 'success' | 'warning' | 'destructive'> = {
-  pending: 'secondary',
-  running: 'default',
-  cancelling: 'warning',
-  cancelled: 'warning',
-  succeeded: 'success',
-  failed: 'destructive',
-  interrupted: 'destructive',
-};
-const TERMINAL: ReadonlySet<JobState> = new Set([
-  'succeeded',
-  'failed',
-  'cancelled',
-  'interrupted',
-]);
 
 function StudioPage() {
   const defaults = useQuery({ queryKey: ['form-defaults'], queryFn: () => api.formDefaults() });
@@ -61,7 +32,7 @@ function StudioPage() {
   // Bootstrap: re-attach to in-flight jobs after a refresh.
   useEffect(() => {
     void api.jobs().then(({ jobs }) => {
-      const active = jobs.filter((j) => !TERMINAL.has(j.state));
+      const active = jobs.filter((j) => !TERMINAL_STATES.has(j.state));
       setActiveJobs(active);
     });
   }, []);
@@ -70,15 +41,14 @@ function StudioPage() {
     setActiveJobs((cur) => [job, ...cur.filter((j) => j.id !== job.id)]);
   };
 
-  const handleStateChange = (id: string, patch: Partial<JobRecord>) => {
+  const handlePatch = (id: string, patch: Partial<JobRecord>) => {
     setActiveJobs((cur) => cur.map((j) => (j.id === id ? { ...j, ...patch } : j)));
   };
 
-  const handleTerminal = (id: string) => {
-    // Keep terminal cards visible so the user can click into the workspace.
-    // They auto-clear when the user hits the "x" or navigates away.
-    setActiveJobs((cur) => cur.map((j) => (j.id === id ? { ...j } : j)));
-  };
+  // Keep terminal cards visible until the user dismisses them — they
+  // hold the "Open workspace" link which is the whole reason the strip
+  // sticks around after a job lands.
+  const handleTerminal = (_id: string) => {};
 
   const dismiss = (id: string) => {
     setActiveJobs((cur) => cur.filter((j) => j.id !== id));
@@ -96,25 +66,12 @@ function StudioPage() {
 
       <NewJobForm defaults={defaults.data} onSubmitted={handleSubmit} />
 
-      {activeJobs.length > 0 ? (
-        <section className="flex flex-col gap-3">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-            <Activity className="mr-1 inline size-3.5" />
-            Jobs
-          </h2>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            {activeJobs.map((job) => (
-              <JobCard
-                key={job.id}
-                job={job}
-                onPatch={(patch) => handleStateChange(job.id, patch)}
-                onTerminal={() => handleTerminal(job.id)}
-                onDismiss={() => dismiss(job.id)}
-              />
-            ))}
-          </div>
-        </section>
-      ) : null}
+      <JobsStrip
+        jobs={activeJobs}
+        onPatch={handlePatch}
+        onTerminal={handleTerminal}
+        onDismiss={dismiss}
+      />
     </div>
   );
 }
@@ -189,6 +146,7 @@ function NewJobForm({ defaults, onSubmitted }: NewJobFormProps) {
         chunk_size: num('chunk_size'),
         start: v('start'),
         duration: v('duration'),
+        executor: (v('executor') as 'auto' | 'worker' | 'server') ?? 'auto',
       };
 
       const { job_id } = await api.submitJob(payload);
@@ -253,7 +211,6 @@ function NewJobForm({ defaults, onSubmitted }: NewJobFormProps) {
                 type="file"
                 className="hidden"
                 onChange={(e) => {
-                  // mirror file name into the input box for visual confirmation
                   const f = e.currentTarget.files?.[0];
                   if (f && formRef.current) {
                     const inp = formRef.current.elements.namedItem('input') as HTMLInputElement;
@@ -385,166 +342,7 @@ function AdvancedFields({ defaults }: { defaults: FormDefaults | undefined }) {
           <Checkbox name="subs" /> Existing subs
         </label>
       </div>
+      <WorkerSelect />
     </div>
   );
-}
-
-// ── Job card ────────────────────────────────────────────────────────────
-
-interface JobCardProps {
-  job: JobRecord;
-  onPatch: (patch: Partial<JobRecord>) => void;
-  onTerminal: () => void;
-  onDismiss: () => void;
-}
-
-function JobCard({ job, onPatch, onTerminal, onDismiss }: JobCardProps) {
-  useEffect(() => {
-    let timer: ReturnType<typeof setTimeout>;
-    let close: () => void;
-
-    const connect = () => {
-      close = openJobStream(
-        job.id,
-        (ev) => applyEvent(ev, onPatch, onTerminal),
-        (err) => {
-          console.warn('stream error', err);
-          timer = setTimeout(connect, 2_000);
-        },
-      );
-    };
-    connect();
-
-    return () => {
-      close?.();
-      clearTimeout(timer);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [job.id]);
-
-  const target = useMemo(() => {
-    const lang = job.inputs.language;
-    const tgt = job.inputs.translate;
-    return tgt ? `${lang} → ${tgt}` : lang;
-  }, [job.inputs.language, job.inputs.translate]);
-
-  const cancel = async () => {
-    try {
-      await api.cancelJob(job.id);
-    } catch (err) {
-      console.warn('cancel failed', err);
-    }
-  };
-
-  const isTerminal = TERMINAL.has(job.state);
-  const wsLink =
-    job.slug && job.timestamp
-      ? { to: '/library/$slug/$ts' as const, params: { slug: job.slug, ts: job.timestamp } }
-      : null;
-
-  return (
-    <Card className="p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <div className="line-clamp-1 text-sm font-medium" title={job.inputs.input}>
-            {job.inputs.input}
-          </div>
-          <div className="text-xs text-muted-foreground">{target}</div>
-        </div>
-        <Badge variant={STATE_BADGE[job.state]}>
-          {STATE_LABEL[job.state] ?? job.state}
-        </Badge>
-      </div>
-
-      <div className="mt-3 flex items-center gap-2">
-        <Progress value={job.progress} className="flex-1" />
-        <span className="w-12 text-right text-xs text-muted-foreground tabular-nums">
-          {Math.round((job.progress || 0) * 100)}%
-        </span>
-      </div>
-
-      <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
-        <span>{formatStage(job.stage)}</span>
-        <span className="line-clamp-1 text-right">{job.message ?? ''}</span>
-      </div>
-
-      {job.error ? (
-        <details className="mt-3 rounded-md border bg-destructive/5 p-2 text-xs">
-          <summary className="cursor-pointer font-medium text-destructive">Details</summary>
-          <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap text-[11px]">
-            {job.error}
-          </pre>
-        </details>
-      ) : null}
-
-      <div className="mt-3 flex items-center gap-2">
-        {!isTerminal ? (
-          <Button variant="outline" size="sm" onClick={cancel}>
-            Cancel
-          </Button>
-        ) : null}
-        {wsLink ? (
-          <Link to={wsLink.to} params={wsLink.params} className={buttonClass('default', 'sm')}>
-            <CheckCircle2 className="size-3.5" />
-            Open
-          </Link>
-        ) : null}
-        {isTerminal ? (
-          <button
-            onClick={onDismiss}
-            className="ml-auto inline-flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-            aria-label="Dismiss"
-          >
-            <X className="size-4" />
-          </button>
-        ) : null}
-      </div>
-    </Card>
-  );
-}
-
-function applyEvent(
-  ev: JobEvent,
-  onPatch: (patch: Partial<JobRecord>) => void,
-  onTerminal: () => void,
-): void {
-  switch (ev.type) {
-    case 'record':
-      onPatch({
-        state: (ev as unknown as JobRecord).state,
-        progress: (ev as unknown as JobRecord).progress,
-        stage: (ev as unknown as JobRecord).stage,
-        message: (ev as unknown as JobRecord).message,
-        slug: (ev as unknown as JobRecord).slug,
-        timestamp: (ev as unknown as JobRecord).timestamp,
-        workspace: (ev as unknown as JobRecord).workspace,
-        error: (ev as unknown as JobRecord).error,
-        finished_at: (ev as unknown as JobRecord).finished_at,
-        started_at: (ev as unknown as JobRecord).started_at,
-      });
-      break;
-    case 'state':
-      onPatch({ state: ev.state });
-      break;
-    case 'event':
-      onPatch({
-        progress: ev.progress,
-        stage: typeof ev.stage === 'string' ? ev.stage : null,
-        message: ev.message,
-      });
-      break;
-    case 'workspace':
-      onPatch({ slug: ev.slug, timestamp: ev.timestamp, workspace: ev.workspace });
-      break;
-    case 'terminal':
-      onPatch({
-        state: ev.state,
-        error: ev.error,
-        finished_at: ev.finished_at,
-      });
-      onTerminal();
-      break;
-    default:
-      break;
-  }
 }

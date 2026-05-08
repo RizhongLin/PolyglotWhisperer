@@ -35,6 +35,8 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --all-extras --frozen --no-install-project
 
 COPY src/ src/
+COPY alembic/ alembic/
+COPY alembic.ini ./
 COPY README.md ./
 # Bring in the freshly built React SPA so the Python wheel's templates
 # directory ships the latest dist/ tree.
@@ -52,9 +54,17 @@ RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
 
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /app/src /app/src
+COPY --from=builder /app/alembic /app/alembic
+COPY --from=builder /app/alembic.ini /app/alembic.ini
 COPY --from=builder /app/pyproject.toml /app/pyproject.toml
+COPY docker/entrypoint.sh /usr/local/bin/pgw-entrypoint
+RUN chmod +x /usr/local/bin/pgw-entrypoint
 
 ENV PATH="/app/.venv/bin:$PATH"
+# Alembic resolves alembic.ini relative to the working directory; pin
+# it here so the entrypoint's `pgw maintenance migrate` finds it
+# regardless of which dir the container is launched from.
+WORKDIR /app
 # Bind to 0.0.0.0 inside the container; host publishes via -p.
 ENV PGW_SERVE_HOST=0.0.0.0
 # Cap concurrent job workers at 1 by default so a local Whisper model stays
@@ -62,9 +72,9 @@ ENV PGW_SERVE_HOST=0.0.0.0
 # with: docker run -e PGW_SERVE_MAX_JOBS=2 ...
 ENV PGW_SERVE_MAX_JOBS=1
 # Persist .env, workspaces, and job logs across container restarts by
-# mounting the working directory at /data.
-WORKDIR /data
+# mounting /data — pgw resolves PGW_WORKSPACE_DIR there.
+ENV PGW_WORKSPACE_DIR=/data/pgw_workspace
 EXPOSE 8321
 
-ENTRYPOINT ["pgw"]
+ENTRYPOINT ["pgw-entrypoint"]
 CMD ["--help"]

@@ -8,13 +8,43 @@ services:
       - "8321:8321"
     volumes:
       - .:/data
-      # Development mode: mount source for live reload (no rebuild needed)
-      # - ./src:/app/src
+      # DOCKER DEV: mount host-built dist/ for instant frontend updates
+      # and set PGW_SPA_DIR=/spa in environment:
+      # - ./src/pgw/templates/dist:/spa
     environment:
       - PGW_WORKSPACE_DIR=/data/pgw_workspace
       - PGW_SERVE_HOST=0.0.0.0
+      - PGW_SERVE_MAX_JOBS=1
+      - PGW_DATABASE_URL=postgresql+psycopg://pgw:pgw@postgres:5432/pgw_dev
+      - PGW_SECRET_KEY=change-me-in-production
       # API keys — set in .env or pass directly:
       # - GROQ_API_KEY=${GROQ_API_KEY}
       # - OPENAI_API_KEY=${OPENAI_API_KEY}
-    entrypoint: pgw
-    command: --help
+      # Frontend dev override (mount dist/ and set PGW_SPA_DIR=/spa):
+      # - PGW_SPA_DIR=/spa
+    # Inherit ENTRYPOINT from the Dockerfile (`pgw-entrypoint`) so the
+    # container runs `pgw maintenance migrate` before serving.
+    command: ["serve", "--no-open"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: pgw
+      POSTGRES_PASSWORD: pgw
+      POSTGRES_DB: pgw_dev
+    volumes:
+      - pgw_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pgw -d pgw_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgw_pg_data:

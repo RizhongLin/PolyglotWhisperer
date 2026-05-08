@@ -10,6 +10,8 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as StudioRouteImport } from './routes/studio'
+import { Route as SetupRouteImport } from './routes/setup'
+import { Route as LoginRouteImport } from './routes/login'
 import { Route as LibraryRouteImport } from './routes/library'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as LibraryIndexRouteImport } from './routes/library.index'
@@ -18,6 +20,16 @@ import { Route as LibrarySlugTsRouteImport } from './routes/library.$slug.$ts'
 const StudioRoute = StudioRouteImport.update({
   id: '/studio',
   path: '/studio',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SetupRoute = SetupRouteImport.update({
+  id: '/setup',
+  path: '/setup',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LibraryRoute = LibraryRouteImport.update({
@@ -44,12 +56,16 @@ const LibrarySlugTsRoute = LibrarySlugTsRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/library': typeof LibraryRouteWithChildren
+  '/login': typeof LoginRoute
+  '/setup': typeof SetupRoute
   '/studio': typeof StudioRoute
   '/library/': typeof LibraryIndexRoute
   '/library/$slug/$ts': typeof LibrarySlugTsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/login': typeof LoginRoute
+  '/setup': typeof SetupRoute
   '/studio': typeof StudioRoute
   '/library': typeof LibraryIndexRoute
   '/library/$slug/$ts': typeof LibrarySlugTsRoute
@@ -58,19 +74,30 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/library': typeof LibraryRouteWithChildren
+  '/login': typeof LoginRoute
+  '/setup': typeof SetupRoute
   '/studio': typeof StudioRoute
   '/library/': typeof LibraryIndexRoute
   '/library/$slug/$ts': typeof LibrarySlugTsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/library' | '/studio' | '/library/' | '/library/$slug/$ts'
+  fullPaths:
+    | '/'
+    | '/library'
+    | '/login'
+    | '/setup'
+    | '/studio'
+    | '/library/'
+    | '/library/$slug/$ts'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/studio' | '/library' | '/library/$slug/$ts'
+  to: '/' | '/login' | '/setup' | '/studio' | '/library' | '/library/$slug/$ts'
   id:
     | '__root__'
     | '/'
     | '/library'
+    | '/login'
+    | '/setup'
     | '/studio'
     | '/library/'
     | '/library/$slug/$ts'
@@ -79,6 +106,8 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LibraryRoute: typeof LibraryRouteWithChildren
+  LoginRoute: typeof LoginRoute
+  SetupRoute: typeof SetupRoute
   StudioRoute: typeof StudioRoute
 }
 
@@ -89,6 +118,20 @@ declare module '@tanstack/react-router' {
       path: '/studio'
       fullPath: '/studio'
       preLoaderRoute: typeof StudioRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/setup': {
+      id: '/setup'
+      path: '/setup'
+      fullPath: '/setup'
+      preLoaderRoute: typeof SetupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/library': {
@@ -138,6 +181,8 @@ const LibraryRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LibraryRoute: LibraryRouteWithChildren,
+  LoginRoute: LoginRoute,
+  SetupRoute: SetupRoute,
   StudioRoute: StudioRoute,
 }
 export const routeTree = rootRouteImport

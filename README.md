@@ -22,6 +22,25 @@ cp .env.example .env
 
 spaCy language models download automatically on first use.
 
+For local Postgres-backed development of `pgw serve`:
+
+```bash
+docker compose -f docker-compose.dev.yml up -d   # Postgres on :5432
+export PGW_DATABASE_URL=postgresql+psycopg://pgw:pgw@localhost:5432/pgw_dev
+uv run pgw maintenance migrate                   # alembic upgrade head, with legacy-stamp fallback
+```
+
+Without `PGW_DATABASE_URL`, the server falls back to a local SQLite file under the workspace dir — fine for single-user use.
+
+For full-stack production-style testing (pgw + Postgres in containers), the included `docker-compose.yml` boots both services together:
+
+```bash
+docker compose up -d            # builds image, starts Postgres + pgw
+docker compose logs -f pgw      # entrypoint runs `pgw maintenance migrate` before serving
+```
+
+The container's entrypoint (`docker/entrypoint.sh`) runs migrations automatically whenever `PGW_DATABASE_URL` is set, so you never need to invoke alembic by hand on the production path.
+
 ## Basic Usage
 
 ```bash
@@ -42,18 +61,18 @@ All pipeline output lands in `pgw_workspace/<slug>/<timestamp>/` alongside a `me
 
 ## Commands
 
-| Command          | Purpose                                                |
-| ---------------- | ------------------------------------------------------ |
-| `pgw run`        | Full pipeline: download, transcribe, refine, translate |
-| `pgw transcribe` | Whisper transcription only (local or cloud API)        |
-| `pgw translate`  | Translate existing subtitle files                      |
-| `pgw refine`     | Fix ASR errors in subtitles with an LLM                |
-| `pgw vocab`      | Vocabulary analysis (difficulty tiers, rare words)     |
-| `pgw export`     | Export vocabulary as CSV for Anki/spreadsheet          |
-| `pgw play`       | Play video with dual subtitles via mpv                 |
-| `pgw serve`      | Launch web player for a workspace (or library view)    |
-| `pgw clean`      | Clear cached files (downloads, audio, transcriptions)  |
-| `pgw languages`  | List all supported languages                           |
+| Command              | Purpose                                                |
+| -------------------- | ------------------------------------------------------ |
+| `pgw run`            | Full pipeline: download, transcribe, refine, translate |
+| `pgw transcribe`     | Whisper transcription only (local or cloud API)        |
+| `pgw translate`      | Translate existing subtitle files                      |
+| `pgw vocab`          | Vocabulary analysis (difficulty tiers, rare words)     |
+| `pgw export`         | Export vocabulary as CSV for Anki/spreadsheet          |
+| `pgw play`           | Play video with dual subtitles via mpv                 |
+| `pgw serve`          | Launch web player for a workspace (or library view)    |
+| `pgw clean`          | Clear cached files (downloads, audio, transcriptions)  |
+| `pgw languages`      | List all supported languages                           |
+| `pgw worker connect` | Run as a remote worker against a `pgw serve` instance  |
 
 ## Backends
 
@@ -116,7 +135,7 @@ The web UI is a **React SPA** built from `frontend/` (Vite + TypeScript + TanSta
 Pages:
 
 - **Library** (`/library`) — workspace grid with thumbnails, language pair, difficulty, dates. Click any card to open the player.
-- **Studio** (`/studio`) — paste a URL or drop a file, pick source language + translation target, hit _Start_. Live progress cards stream events from the backend; cancel any time, close the tab and come back without losing state. Advanced flags (backends, models, chunk size, ffmpeg start/duration, refine, subs) are tucked behind a disclosure.
+- **Studio** (`/studio`) — paste a URL or drop a file, pick source + target language from dropdowns, choose where to run (auto / worker / server), hit _Start_. Live progress cards stream events from the backend; cancel any time, close the tab and come back without losing state. Advanced flags (backends, models, chunk size, ffmpeg start/duration, refine, subs) are tucked behind a disclosure.
 - **Player** (`/library/<slug>/<ts>`) — HTML5 video, click-to-seek transcript with anticipate/linger windows, track switcher (bilingual / original / translation), vocab card (top rare words + difficulty), downloads card, re-download fallback for missing video files.
 
 Backend is **FastAPI + uvicorn** serving JSON over `/api/...` and raw workspace files over `/ws/<slug>/<ts>/<file>`. Job state is persisted as append-only JSONL under `<workspace>/.jobs/`, so an in-flight job survives a browser refresh and the server's restart marks orphaned jobs as `interrupted` rather than leaving them stuck.
@@ -126,6 +145,21 @@ Knobs:
 - `PGW_SERVE_HOST` — bind address (default `127.0.0.1`; Docker sets `0.0.0.0`).
 - `PGW_SERVE_MAX_JOBS` — concurrent pipeline workers (default `1`, keeps Whisper warm).
 - `PGW_JOBS_RETENTION` — how many finished job logs to keep (default `200`).
+- `PGW_DATABASE_URL` — DB connection string (default: SQLite under workspace dir; production: `postgresql+psycopg://...`).
+- `PGW_DB_POOL_SIZE` — Postgres connection pool size (default `5`).
+- `PGW_ADMIN_EMAIL`, `PGW_ADMIN_PASSWORD` — non-interactive admin bootstrap on first start. Without them, the SPA's `/setup` flow handles it.
+- `PGW_SECRET_KEY` — signs CSRF cookies and signed URLs. Required in production.
+
+- `PGW_SPA_DIR` — override the built-in SPA bundle path (useful during Docker-based frontend dev with a host-mounted `dist/` volume).
+- `PGW_DEV_BACKEND` — backend URL for the Vite dev server proxy (default `http://127.0.0.1:8321`; set when Docker hosts the backend).
+
+### Auth
+
+When the DB has no users, `pgw serve` runs in **bootstrap mode** — the SPA serves `/setup` on first visit so you can create the admin. After that, `/login` is required for `/api/*` and `/jobs/*`. CSRF protection is double-submit cookie + `X-CSRF-Token` header on every state-changing request.
+
+### Workers
+
+`pgw worker connect --server <url> --token <t>` runs the pipeline on the user's machine using their own IP, GPU, and API keys. The remote `pgw serve` becomes a thin orchestrator + library surface; videos and big artifacts stay local. On the server side, manage tokens with `POST /api/workers`, `GET /api/workers`, `DELETE /api/workers/{id}`. In the Studio, select where to run each job — Auto (prefer connected worker), This machine (explicit worker), or Server (admin-only). When a worker disconnects, its in-flight jobs are marked `interrupted` and any open NDJSON stream reflects it.
 
 ## Vocabulary
 
@@ -169,18 +203,21 @@ docker run --rm -it -p 8321:8321 \
 
 ## Architecture
 
-```
+```text
 src/pgw/
-├── cli/          Typer commands (run, transcribe, translate, serve, …)
-├── core/         Config (Pydantic), pipeline orchestrator, events
+├── auth/         Argon2 passwords, sessions, CSRF, FastAPI deps, env-bootstrap
+├── cli/          Typer commands (run, transcribe, translate, serve, worker, …)
+├── core/         Config (Pydantic), pipeline orchestrator, events, JobContext
+├── db/           SQLAlchemy 2.0 engine + ORM models (users, workspaces, vocab, workers)
 ├── downloader/   yt-dlp wrapper, URL resolver
 ├── llm/          OpenAI SDK client, translation, refinement, prompts
-├── server/       FastAPI app (library + jobs API), JobManager, exceptions
+├── server/       FastAPI app + JobManager + routes/ (auth, workers, …)
 ├── subtitles/    Format conversion (VTT/SRT), PDF/EPUB export
 ├── transcriber/  Whisper backends (stable-ts local + API), segmentation
 ├── templates/    Built React SPA (templates/dist/) + favicon + brand mark
 ├── utils/        Audio extraction, cache, logging, spaCy, paths
-└── vocab/        Vocabulary analysis + CEFR estimation
+├── vocab/        Vocabulary analysis + CEFR estimation
+└── worker/       `pgw worker connect` agent + protocol (WebSocket to remote server)
 
 frontend/        React SPA source (compiles → src/pgw/templates/dist/)
 ├── src/

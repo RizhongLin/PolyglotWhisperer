@@ -29,6 +29,8 @@ from pydantic_settings import (
     SettingsConfigDict,
 )
 
+from pgw.core.context import JobContext, is_worker_thread
+
 _USER_CONFIG = Path.home() / ".config" / "pgw" / "config.toml"
 _PROJECT_CONFIG = Path("pgw.toml")
 
@@ -179,13 +181,68 @@ def _expand_dot_paths(overrides: dict[str, object]) -> dict[str, Any]:
     return nested
 
 
-def load_config(**cli_overrides: object) -> PGWConfig:
+def _env_key_to_dot_path(env_key: str) -> str | None:
+    """Convert ``PGW_LLM__API_KEY`` → ``llm.api_key``. Returns None if the
+    key isn't a recognised PGW config var.
+    """
+    if not env_key.startswith("PGW_"):
+        return None
+    return env_key[4:].lower().replace("__", ".")
+
+
+def _context_overrides(context: JobContext | None) -> dict[str, object]:
+    """Translate ``JobContext.env_overrides`` into init-settings dot-paths.
+
+    Critical: we deliberately do NOT mutate ``os.environ`` to inject
+    per-user credentials. Mutating the process global is not safe under
+    concurrent ``ThreadPoolExecutor`` jobs — thread A's restoration races
+    thread B's ``PGWConfig(...)`` constructor. By piping overrides
+    through ``init_settings`` (the highest pydantic-settings layer),
+    each call gets its own per-user values without any cross-thread
+    visibility.
+    """
+    if context is None or not context.env_overrides:
+        return {}
+    out: dict[str, object] = {}
+    for env_key, value in context.env_overrides.items():
+        dot_path = _env_key_to_dot_path(env_key)
+        if dot_path is not None:
+            out[dot_path] = value
+    return out
+
+
+def load_config(
+    *,
+    context: JobContext | None = None,
+    **cli_overrides: object,
+) -> PGWConfig:
     """Load configuration from all layers and merge.
 
     Args:
+        context: Per-job execution context. Required when called from a
+            ``JobManager`` worker thread (prefix ``pgw-job-``); CLI/main
+            thread callers may leave it ``None``. ``context.env_overrides``
+            is folded into ``init_settings`` (highest precedence) so
+            per-user API keys win over the process env without ever
+            mutating it — safe under concurrent jobs.
         **cli_overrides: Direct overrides from CLI flags. Keys can be
-            dot-separated (e.g. whisper.local_model="medium") to target
-            nested models. ``None`` values are dropped so absent flags do
-            not override env/TOML.
+            dot-separated (e.g. ``whisper.local_model="medium"``) to
+            target nested models. ``None`` values are dropped so absent
+            flags do not override env/TOML. CLI overrides win over
+            context overrides.
+
+    Raises:
+        RuntimeError: If invoked from a pipeline worker thread without
+            an explicit ``context``. This guard makes credential leakage
+            across users a startup-time error, not a silent data leak.
     """
-    return PGWConfig(**_expand_dot_paths(cli_overrides))
+    if context is None and is_worker_thread():
+        raise RuntimeError(
+            "load_config() called from a pipeline worker thread without a "
+            "JobContext. JobManager must construct one and pass it explicitly "
+            "to prevent cross-user credential leakage."
+        )
+
+    # Context first, CLI second — CLI is more explicit and wins on conflict.
+    merged = {**_context_overrides(context), **cli_overrides}
+    return PGWConfig(**_expand_dot_paths(merged))

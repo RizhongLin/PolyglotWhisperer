@@ -1,0 +1,26 @@
+# Development-only services. Start with:
+#   docker compose -f docker-compose.dev.yml up -d
+#
+# Postgres listens on 5432. Connect with:
+#   PGW_DATABASE_URL=postgresql+psycopg://pgw:pgw@localhost:5432/pgw_dev
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: pgw_pg_dev
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: pgw
+      POSTGRES_PASSWORD: pgw
+      POSTGRES_DB: pgw_dev
+    volumes:
+      - pgw_pg_dev_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pgw -d pgw_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgw_pg_dev_data:

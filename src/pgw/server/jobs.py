@@ -39,7 +39,7 @@ from typing import Any, AsyncIterator, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from pgw.core.events import PipelineEvent
-from pgw.server.exceptions import JobCancelled
+from pgw.server.exceptions import JobCancelled, WorkerNotConnectedError
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +97,10 @@ class JobRequest(BaseModel):
     chunk_size: int | None = Field(default=None, ge=1, le=400)
     start: str | None = None
     duration: str | None = None
+    #: Where to run. ``auto`` picks worker if connected else server;
+    #: ``worker`` requires a connected worker (else 409); ``server``
+    #: requires admin (server-side execution uses operator API keys).
+    executor: Literal["auto", "worker", "server"] = "auto"
 
     @field_validator("start", "duration")
     @classmethod
@@ -186,26 +190,181 @@ class JobManager:
 
     # ── Public API ───────────────────────────────────────────────────
 
-    def submit(self, req: JobRequest) -> str:
+    def submit(self, req: JobRequest, *, user_id: int | None = None) -> str:
+        """Enqueue a job. ``user_id`` enables worker-routing.
+
+        Routing rules:
+        - ``executor='worker'`` requires a connected worker for ``user_id``;
+          if missing, falls through to ``self._on_no_worker_for_required(...)``
+          which the caller can wire to raise 409.
+        - ``executor='server'`` always runs in-process (caller is
+          responsible for any admin-only gate).
+        - ``executor='auto'`` (default): worker if connected, else server.
+
+        Worker dispatch is best-effort wiring in P3-finish: the worker
+        runs the same ``run_pipeline`` and streams ``job.event`` frames
+        back, which the WS handler turns into ``self.handle_remote_event``
+        calls so the SPA's NDJSON stream is byte-identical to in-process
+        jobs.
+        """
+        from pgw.server.worker_registry import GLOBAL_WORKERS
+
         job_id = uuid.uuid4().hex
+        inputs = req.model_dump()
+        if user_id is not None:
+            inputs["user_id"] = user_id
         record = JobRecord(
             id=job_id,
             state="pending",
-            inputs=req.model_dump(),
+            inputs=inputs,
             created_at=time.time(),
         )
         log_path = self.jobs_dir / f"{job_id}.jsonl"
         state = _JobState(record=record, log_path=log_path)
         with self._lock:
             self._states[job_id] = state
-        # Persist the initial record + pending state outside the lock so a
-        # slow filesystem doesn't stall request threads.
         self._broadcast(state, {"type": "record", **record.public()})
         self._broadcast(state, {"type": "state", "state": "pending", "ts": time.time()})
+
+        worker_connected = user_id is not None and GLOBAL_WORKERS.is_connected(user_id)
+        if req.executor == "worker" or (req.executor == "auto" and worker_connected):
+            if not worker_connected:
+                raise WorkerNotConnectedError(
+                    "explicit executor='worker' but no worker is connected "
+                    "for this user — start one with `pgw worker connect`"
+                )
+            assert user_id is not None
+            self._dispatch_to_worker(state, user_id=user_id)
+            return job_id
+
+        # In-process fallback (server-side execution).
         self._executor.submit(self._run_job, job_id)
         return job_id
 
+    # ── Worker dispatch ──────────────────────────────────────────────
+
+    def _dispatch_to_worker(self, state: _JobState, *, user_id: int) -> None:
+        """Send a ``job.assign`` frame and mark the job as running.
+
+        Subsequent ``job.event`` frames arriving over the WS feed back
+        into ``handle_remote_event`` (called by the WS handler), which
+        keeps the broadcast contract identical to in-process jobs.
+        """
+        from pgw.server.worker_registry import GLOBAL_WORKERS
+
+        with self._lock:
+            state.record.state = "running"
+            state.record.started_at = time.time()
+        self._broadcast(
+            state,
+            {
+                "type": "state",
+                "state": "running",
+                "ts": time.time(),
+                "started_at": state.record.started_at,
+            },
+        )
+        spec = {k: v for k, v in state.record.inputs.items() if k != "user_id"}
+        ok = GLOBAL_WORKERS.send_threadsafe(
+            user_id,
+            {"type": "job.assign", "job_id": state.record.id, "spec": spec},
+        )
+        if not ok:
+            # Failed to dispatch — mark interrupted.
+            with self._lock:
+                state.record.state = "interrupted"
+                state.record.error = "failed to deliver job to worker"
+                state.record.finished_at = time.time()
+                self._terminal_locked(state)
+            return
+        GLOBAL_WORKERS.track_job(user_id, state.record.id)
+
+    def handle_remote_event(self, job_id: str, event: dict) -> None:
+        """Process a ``job.event`` frame from a worker.
+
+        Translates into the same NDJSON shape ``_make_event_callback``
+        produces, so subscribers can't tell whether the producer was
+        local or remote.
+        """
+        with self._lock:
+            state = self._states.get(job_id)
+            if state is None:
+                return
+            stage = event.get("stage", "")
+            progress = float(event.get("progress", 0.0))
+            message = str(event.get("message", ""))
+            data = event.get("data")
+            state.record.stage = stage
+            state.record.progress = progress
+            state.record.message = message
+        self._broadcast(
+            state,
+            {
+                "type": "event",
+                "stage": stage,
+                "progress": progress,
+                "message": message,
+                "data": data,
+                "ts": time.time(),
+            },
+        )
+
+    def handle_remote_workspace(
+        self, job_id: str, *, slug: str, timestamp: str, fs_path: str
+    ) -> None:
+        with self._lock:
+            state = self._states.get(job_id)
+            if state is None:
+                return
+            state.record.workspace = fs_path
+            state.record.slug = slug
+            state.record.timestamp = timestamp
+            self._fanout_log_locked(
+                state,
+                {
+                    "type": "workspace",
+                    "workspace": fs_path,
+                    "slug": slug,
+                    "timestamp": timestamp,
+                    "ts": time.time(),
+                },
+            )
+
+    def handle_remote_terminal(
+        self, job_id: str, *, terminal_state: str, error: str | None = None
+    ) -> None:
+        from pgw.server.worker_registry import GLOBAL_WORKERS
+
+        with self._lock:
+            state = self._states.get(job_id)
+            if state is None:
+                return
+            state.record.state = terminal_state  # type: ignore[assignment]
+            state.record.error = error
+            state.record.finished_at = time.time()
+            self._terminal_locked(state)
+        user_id = state.record.inputs.get("user_id")
+        if isinstance(user_id, int):
+            GLOBAL_WORKERS.untrack_job(user_id, job_id)
+        self._gc_logs()
+
+    def mark_jobs_interrupted(self, job_ids: set[str]) -> None:
+        """Called by the WorkerRegistry on disconnect."""
+        for job_id in job_ids:
+            with self._lock:
+                state = self._states.get(job_id)
+                if state is None or state.record.state in _TERMINAL_STATES:
+                    continue
+                state.record.state = "interrupted"
+                state.record.error = "worker disconnected"
+                state.record.finished_at = time.time()
+                self._terminal_locked(state)
+        if job_ids:
+            self._gc_logs()
+
     def cancel(self, job_id: str) -> bool:
+        from pgw.server.worker_registry import GLOBAL_WORKERS
+
         with self._lock:
             state = self._states.get(job_id)
             if state is None or state.record.state in _TERMINAL_STATES:
@@ -214,10 +373,19 @@ class JobManager:
             should_emit = state.record.state == "running"
             if should_emit:
                 state.record.state = "cancelling"
+            user_id = state.record.inputs.get("user_id")
         if should_emit:
             self._broadcast(
                 state,
                 {"type": "state", "state": "cancelling", "ts": time.time()},
+            )
+        # If this job was dispatched to a worker, also forward the
+        # cancel signal — the worker checks its own cancel token at
+        # every pipeline stage boundary.
+        if isinstance(user_id, int) and GLOBAL_WORKERS.is_connected(user_id):
+            GLOBAL_WORKERS.send_threadsafe(
+                user_id,
+                {"type": "job.cancel", "job_id": job_id},
             )
         return True
 
@@ -358,6 +526,7 @@ class JobManager:
         # Defer heavy imports until a job actually runs.
         from pgw.cli.utils import build_config_overrides
         from pgw.core.config import load_config
+        from pgw.core.context import JobContext, use_context
         from pgw.core.languages import validate_language
         from pgw.core.pipeline import run_pipeline
 
@@ -376,41 +545,52 @@ class JobManager:
             translate=req.get("translate"),
             subs=req.get("subs", False),
         )
-        config = load_config(**overrides)
 
-        on_event = self._make_event_callback(state)
-
-        workspace = run_pipeline(
-            input_path=req["input"],
-            config=config,
-            translate=req.get("translate"),
-            refine=bool(req.get("refine", False)),
-            play=False,
-            start=req.get("start"),
-            duration=req.get("duration"),
-            on_event=on_event,
-            chunk_size=req.get("chunk_size"),
-            cancel_token=state.cancel_token,
+        # P1: env_overrides is empty (single-tenant). P2 will populate it
+        # from the requesting user's encrypted credential rows.
+        ctx = JobContext(
+            user_id=req.get("user_id"),
+            job_id=state.record.id,
+            env_overrides={},
         )
 
-        # The save stage already emits a workspace event via on_event when
-        # the pipeline calls emit("save", 1.0, ..., data={"workspace": ...}).
-        # As a safety net, capture the path here too.
-        with self._lock:
-            if not state.record.workspace:
-                state.record.workspace = str(workspace)
-                state.record.slug = workspace.parent.name
-                state.record.timestamp = workspace.name
-                self._fanout_log_locked(
-                    state,
-                    {
-                        "type": "workspace",
-                        "workspace": str(workspace),
-                        "slug": workspace.parent.name,
-                        "timestamp": workspace.name,
-                        "ts": time.time(),
-                    },
-                )
+        with use_context(ctx):
+            config = load_config(context=ctx, **overrides)
+
+            on_event = self._make_event_callback(state)
+
+            workspace = run_pipeline(
+                input_path=req["input"],
+                config=config,
+                translate=req.get("translate"),
+                refine=bool(req.get("refine", False)),
+                play=False,
+                start=req.get("start"),
+                duration=req.get("duration"),
+                on_event=on_event,
+                chunk_size=req.get("chunk_size"),
+                cancel_token=state.cancel_token,
+            )
+
+            # The save stage already emits a workspace event via on_event
+            # when the pipeline calls
+            # ``emit("save", 1.0, ..., data={"workspace": ...})``.
+            # As a safety net, capture the path here too.
+            with self._lock:
+                if not state.record.workspace:
+                    state.record.workspace = str(workspace)
+                    state.record.slug = workspace.parent.name
+                    state.record.timestamp = workspace.name
+                    self._fanout_log_locked(
+                        state,
+                        {
+                            "type": "workspace",
+                            "workspace": str(workspace),
+                            "slug": workspace.parent.name,
+                            "timestamp": workspace.name,
+                            "ts": time.time(),
+                        },
+                    )
 
     def _make_event_callback(self, state: _JobState):
         def on_event(event: PipelineEvent) -> None:

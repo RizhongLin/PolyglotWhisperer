@@ -1,28 +1,94 @@
 import type {
+  AuthState,
   FormDefaults,
   JobEvent,
   JobInputs,
   JobRecord,
   LanguageInfo,
+  MeResponse,
   VocabSummary,
+  WorkerSummary,
   WorkspaceDetail,
   WorkspaceSummary,
 } from './types';
 
+/**
+ * Stable error codes returned by the backend (mirrors `pgw/errors.py`).
+ *
+ * Wire format: server raises `HTTPException(detail={"code": "...", "message": "..."})`
+ * — we pull the `code` out so callers can switch on it without parsing
+ * free-form strings. New codes can be added freely; renames need a
+ * coordinated server + client release.
+ */
+export const ErrCode = {
+  AuthInvalidCredentials: 'auth.invalid_credentials',
+  AuthNotAuthenticated: 'auth.not_authenticated',
+  AuthAdminRequired: 'auth.admin_required',
+  AuthInvalidEmail: 'auth.invalid_email',
+  CsrfMissing: 'csrf.missing',
+  CsrfMismatch: 'csrf.mismatch',
+  CsrfInvalidSignature: 'csrf.invalid_signature',
+  SetupAlreadyComplete: 'setup.already_complete',
+  WorkerNotFound: 'worker.not_found',
+  WorkerNoConnected: 'worker.no_connected_worker',
+  JobNotFound: 'job.not_found',
+  JobInputRejected: 'job.input_rejected',
+} as const;
+
+export type ErrCodeValue = (typeof ErrCode)[keyof typeof ErrCode];
+
 export class ApiError extends Error {
   status: number;
+  /** Backend `Err` code if present; null for legacy/free-form errors. */
+  code: string | null;
   payload?: unknown;
 
-  constructor(message: string, status: number, payload?: unknown) {
+  constructor(message: string, status: number, code: string | null, payload?: unknown) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.code = code;
     this.payload = payload;
+  }
+
+  is(code: ErrCodeValue): boolean {
+    return this.code === code;
   }
 }
 
+const CSRF_COOKIE = 'pgw_csrf';
+const CSRF_HEADER = 'X-CSRF-Token';
+
+function readCookie(name: string): string | null {
+  // Document cookies are always plain text, no need for any parsing
+  // helpers. Linear scan is fine for the handful of cookies we set.
+  const prefix = `${name}=`;
+  for (const part of document.cookie.split(';')) {
+    const trimmed = part.trim();
+    if (trimmed.startsWith(prefix)) {
+      return decodeURIComponent(trimmed.slice(prefix.length));
+    }
+  }
+  return null;
+}
+
+function isMutation(method: string | undefined): boolean {
+  if (!method) return false;
+  const m = method.toUpperCase();
+  return m !== 'GET' && m !== 'HEAD' && m !== 'OPTIONS';
+}
+
 async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
-  const resp = await fetch(input, init);
+  const headers = new Headers(init?.headers);
+  if (isMutation(init?.method)) {
+    const csrf = readCookie(CSRF_COOKIE);
+    if (csrf) headers.set(CSRF_HEADER, csrf);
+  }
+  const resp = await fetch(input, {
+    ...init,
+    headers,
+    credentials: 'include',
+  });
   const text = await resp.text();
   let body: unknown;
   try {
@@ -31,31 +97,75 @@ async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
     body = { detail: text };
   }
   if (!resp.ok) {
-    throw new ApiError(pickError(body) ?? `HTTP ${resp.status}`, resp.status, body);
+    const { message, code } = pickError(body);
+    throw new ApiError(message ?? `HTTP ${resp.status}`, resp.status, code, body);
   }
   return body as T;
 }
 
-function pickError(payload: unknown): string | null {
-  if (!payload || typeof payload !== 'object') return null;
+/**
+ * Extracts `{message, code}` from FastAPI error responses.
+ *
+ * Three shapes we accept (most → least preferred):
+ *   1. `{"detail": {"code": "auth.invalid_credentials", "message": "..."}}` — current `Err.envelope()` format.
+ *   2. `{"detail": "..."}` — legacy free-form string.
+ *   3. `{"detail": [{"msg": "...", ...}, ...]}` — Pydantic 422 validation list.
+ */
+function pickError(payload: unknown): { message: string | null; code: string | null } {
+  if (!payload || typeof payload !== 'object') return { message: null, code: null };
   const obj = payload as Record<string, unknown>;
-  if (typeof obj['error'] === 'string') return obj['error'];
+  if (typeof obj['error'] === 'string') return { message: obj['error'], code: null };
+
   const detail = obj['detail'];
-  if (typeof detail === 'string') return detail;
+  if (typeof detail === 'string') return { message: detail, code: null };
+  if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
+    const env = detail as Record<string, unknown>;
+    const code = typeof env['code'] === 'string' ? env['code'] : null;
+    const message = typeof env['message'] === 'string' ? env['message'] : null;
+    return { message, code };
+  }
   if (Array.isArray(detail)) {
     const msgs = detail
-      .map((d) => (d && typeof d === 'object' && 'msg' in d ? String((d as { msg: unknown }).msg) : null))
+      .map((d) =>
+        d && typeof d === 'object' && 'msg' in d ? String((d as { msg: unknown }).msg) : null,
+      )
       .filter((m): m is string => Boolean(m));
-    if (msgs.length > 0) return msgs.join('; ');
+    if (msgs.length > 0) return { message: msgs.join('; '), code: null };
   }
-  return null;
+  return { message: null, code: null };
 }
 
 export const api = {
+  // ── Auth ──
+
+  authState: () => request<AuthState>('/api/auth/state'),
+
+  me: () => request<MeResponse>('/api/me'),
+
+  setupAdmin: (email: string, password: string) =>
+    request<{ status: string }>('/api/auth/setup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    }),
+
+  login: (email: string, password: string) =>
+    request<null>('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    }),
+
+  logout: () => request<null>('/api/auth/logout', { method: 'POST' }),
+
+  // ── Workspaces ──
+
   workspaces: () => request<{ workspaces: WorkspaceSummary[] }>('/api/workspaces'),
 
   workspace: (slug: string, ts: string) =>
-    request<WorkspaceDetail>(`/api/workspaces/${encodeURIComponent(slug)}/${encodeURIComponent(ts)}`),
+    request<WorkspaceDetail>(
+      `/api/workspaces/${encodeURIComponent(slug)}/${encodeURIComponent(ts)}`,
+    ),
 
   vocab: (slug: string, ts: string) =>
     request<VocabSummary>(
@@ -65,6 +175,8 @@ export const api = {
   formDefaults: () => request<FormDefaults>('/api/config/defaults'),
 
   languages: () => request<LanguageInfo[]>('/api/languages'),
+
+  workers: () => request<WorkerSummary[]>('/api/workers'),
 
   jobs: () => request<{ jobs: JobRecord[] }>('/jobs'),
 
@@ -85,10 +197,10 @@ export const api = {
   uploadFile: async (file: File) => {
     const fd = new FormData();
     fd.append('file', file, file.name);
-    return request<{ files: Array<{ path: string; name: string; size: number }> }>(
-      '/uploads',
-      { method: 'POST', body: fd },
-    );
+    return request<{ files: Array<{ path: string; name: string; size: number }> }>('/uploads', {
+      method: 'POST',
+      body: fd,
+    });
   },
 };
 
@@ -110,9 +222,10 @@ export function openJobStream(
     try {
       const resp = await fetch(`/jobs/${encodeURIComponent(jobId)}/events`, {
         signal: ctrl.signal,
+        credentials: 'include',
       });
       if (!resp.ok || !resp.body) {
-        throw new ApiError(`Stream failed: HTTP ${resp.status}`, resp.status);
+        throw new ApiError(`Stream failed: HTTP ${resp.status}`, resp.status, null);
       }
       const reader = resp.body.getReader();
       const decoder = new TextDecoder();

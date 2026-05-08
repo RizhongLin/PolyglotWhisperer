@@ -1,6 +1,7 @@
 # Claude / AI dev tools
 CLAUDE.md
 .claude/
+docs/plans/
 
 # Python
 __pycache__/

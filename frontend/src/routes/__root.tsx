@@ -1,5 +1,7 @@
-import { Outlet, createRootRouteWithContext } from '@tanstack/react-router';
-import { type QueryClient } from '@tanstack/react-query';
+import { Outlet, createRootRouteWithContext, useNavigate, useLocation } from '@tanstack/react-router';
+import { type QueryClient, useQuery } from '@tanstack/react-query';
+import { useEffect } from 'react';
+import { api } from '@/api/client';
 import { Header } from '@/components/header';
 
 interface RouterContext {
@@ -10,7 +12,32 @@ export const Route = createRootRouteWithContext<RouterContext>()({
   component: RootComponent,
 });
 
+const PUBLIC_PATHS = new Set(['/login', '/setup']);
+
 function RootComponent() {
+  const nav = useNavigate();
+  const loc = useLocation();
+  const isPublic = PUBLIC_PATHS.has(loc.pathname);
+
+  // Cheap state probe — has_admin tells us whether to gate, authenticated
+  // tells us if the visitor already has a session.
+  const state = useQuery({
+    queryKey: ['auth-state'],
+    queryFn: () => api.authState(),
+    // Re-evaluate aggressively so login/logout reflect immediately.
+    staleTime: 0,
+  });
+
+  useEffect(() => {
+    if (!state.data) return;
+    if (isPublic) return;
+    if (!state.data.has_admin) {
+      nav({ to: '/setup', replace: true });
+    } else if (!state.data.authenticated) {
+      nav({ to: '/login', replace: true });
+    }
+  }, [state.data, isPublic, nav]);
+
   return (
     <div className="app-gradient flex min-h-screen flex-col">
       <Header />

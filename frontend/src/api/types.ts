@@ -1,5 +1,18 @@
 // Backend wire shapes. Mirror server/app.py and server/jobs.py.
 
+// ── Auth ──
+
+export interface AuthState {
+  has_admin: boolean;
+  authenticated: boolean;
+}
+
+export interface MeResponse {
+  id: number;
+  email: string;
+  is_admin: boolean;
+}
+
 export interface WorkspaceSummary {
   slug: string;
   timestamp: string;
@@ -91,6 +104,15 @@ export interface LanguageInfo {
   has_alignment: boolean;
 }
 
+export interface WorkerSummary {
+  id: number;
+  name: string;
+  connected: boolean;
+  created_at: string;
+  revoked_at: string | null;
+  last_seen_at: string | null;
+}
+
 // ── Jobs ──
 
 export type JobState =
@@ -115,6 +137,7 @@ export interface JobInputs {
   chunk_size: number | null;
   start: string | null;
   duration: string | null;
+  executor: 'auto' | 'worker' | 'server';
 }
 
 export interface JobRecord {

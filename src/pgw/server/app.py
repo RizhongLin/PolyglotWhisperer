@@ -30,10 +30,11 @@ from pathlib import Path
 from queue import Full
 from typing import AsyncIterator
 
-from fastapi import FastAPI, HTTPException, Request, UploadFile, status
+from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile, status
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from starlette.responses import FileResponse
 
+from pgw.auth.deps import current_user_or_bootstrap
 from pgw.server.jobs import JobManager, JobRequest
 from pgw.server.templates import (
     _ICON_PNG,
@@ -246,13 +247,61 @@ def _form_defaults() -> dict:
 # ── Library app ──────────────────────────────────────────────────────────
 
 
+# Module-level handle so the worker WS handler (which doesn't have
+# request scope) can reach the active JobManager.
+_active_job_manager: JobManager | None = None
+
+
+def get_job_manager() -> JobManager | None:
+    return _active_job_manager
+
+
+def _bootstrap_db() -> None:
+    """Create tables (idempotent) + provision admin from env if any.
+
+    Runs once per ``create_library_app`` call. ``Base.metadata.create_all``
+    no-ops on tables that already exist, so this is safe to call on
+    every start. Env-var admin provisioning runs after schema is ready.
+    """
+    import pgw.db.models  # noqa: F401  ensure ORM tables registered
+    from pgw.auth.bootstrap import ensure_admin_from_env
+    from pgw.db import Base, SessionLocal, get_engine
+
+    Base.metadata.create_all(get_engine())
+    with SessionLocal() as db:
+        ensure_admin_from_env(db)
+
+
 def create_library_app(base_dir: Path, jobs: JobManager) -> FastAPI:
+    _bootstrap_db()
+
+    # Make the manager reachable to the worker WS handler and wire
+    # the registry's disconnect callback so dropped workers mark their
+    # in-flight jobs as ``interrupted``.
+    global _active_job_manager
+    _active_job_manager = jobs
+    from pgw.server.worker_registry import GLOBAL_WORKERS
+
+    GLOBAL_WORKERS.set_disconnect_callback(
+        lambda _user_id, job_ids: jobs.mark_jobs_interrupted(job_ids)
+    )
+
     app = FastAPI(
         title="pgw library",
         docs_url=None,
         redoc_url=None,
         openapi_url="/openapi.json",
     )
+
+    # Mount auth + setup endpoints first so they're discoverable
+    # even before the rest of the app initialises.
+    from pgw.server.routes.auth import router as auth_router
+    from pgw.server.routes.workers import router as workers_router
+    from pgw.server.routes.workers import ws_router as worker_ws_router
+
+    app.include_router(auth_router)
+    app.include_router(workers_router)
+    app.include_router(worker_ws_router)
 
     # ── Static icons (referenced by both SPA and the OS-level favicon) ──
 
@@ -309,7 +358,15 @@ def create_library_app(base_dir: Path, jobs: JobManager) -> FastAPI:
         return {"jobs": [r.public() for r in jobs.list()]}
 
     @app.post("/jobs", status_code=status.HTTP_202_ACCEPTED)
-    async def create_job(request: Request) -> dict:
+    async def create_job(
+        request: Request,
+        user=Depends(current_user_or_bootstrap),
+    ) -> dict:
+        from pgw.errors import Err
+        from pgw.errors import envelope as err_envelope
+        from pgw.server.exceptions import WorkerNotConnectedError
+        from pgw.server.worker_registry import GLOBAL_WORKERS
+
         try:
             body = await request.body()
             payload = json.loads(body or b"{}")
@@ -320,8 +377,83 @@ def create_library_app(base_dir: Path, jobs: JobManager) -> FastAPI:
         except Exception as exc:  # noqa: BLE001 - surface validation errors
             raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Invalid request: {exc}") from exc
         if not _input_is_safe(req.input, base_dir):
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Input path is not allowed")
-        return {"job_id": jobs.submit(req)}
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail=err_envelope(Err.JOB_INPUT_REJECTED, "Input path is not allowed"),
+            )
+
+        # Server-side execution uses operator API keys — restrict to
+        # admins. Bootstrap mode (SYSTEM_USER) is treated as admin so
+        # solo + pre-setup deployments still work.
+        worker_connected = user.id is not None and GLOBAL_WORKERS.is_connected(user.id)
+        will_run_locally = req.executor == "server" or (
+            req.executor == "auto" and not worker_connected
+        )
+        if will_run_locally and not user.is_admin:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                detail=err_envelope(
+                    Err.AUTH_ADMIN_REQUIRED,
+                    "server-side execution is admin-only — "
+                    "connect a worker with `pgw worker connect`",
+                ),
+            )
+
+        try:
+            job_id = jobs.submit(req, user_id=user.id)
+        except WorkerNotConnectedError as exc:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail=err_envelope(Err.WORKER_NO_CONNECTED, str(exc)),
+            ) from exc
+
+        return {"job_id": job_id}
+
+    @app.post(
+        "/api/jobs/{job_id}/artifacts",
+        status_code=status.HTTP_204_NO_CONTENT,
+    )
+    async def upload_artifact(
+        job_id: str,
+        request: Request,
+        slug: str,
+        timestamp: str,
+        name: str,
+    ) -> Response:
+        """Worker pushes a single artifact (VTT, JSON, audio) to the
+        server's filesystem under the workspace path.
+
+        Auth: ``Authorization: Bearer <worker-token>`` header.
+        """
+        if not _JOB_ID_RE.match(job_id):
+            raise HTTPException(status.HTTP_404_NOT_FOUND)
+
+        auth = request.headers.get("Authorization", "")
+        if not auth.lower().startswith("bearer "):
+            raise HTTPException(
+                status.HTTP_401_UNAUTHORIZED,
+                detail="expected Authorization: Bearer <worker-token>",
+            )
+        raw_token = auth[len("bearer ") :].strip()
+        from pgw.db.session import SessionLocal
+        from pgw.worker.tokens import lookup as lookup_token
+
+        with SessionLocal() as db:
+            row = lookup_token(db, raw_token)
+        if row is None:
+            raise HTTPException(
+                status.HTTP_401_UNAUTHORIZED,
+                detail="invalid or revoked worker token",
+            )
+
+        workspace = _validate_ws(slug, timestamp, base_dir)
+        safe_name = _safe_filename(name)
+        body = await request.body()
+        if not body:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "empty body")
+        dest = workspace / safe_name
+        dest.write_bytes(body)
+        return Response(status_code=204)
 
     @app.get("/jobs/{job_id}")
     def get_job(job_id: str) -> dict:
@@ -426,7 +558,22 @@ def create_library_app(base_dir: Path, jobs: JobManager) -> FastAPI:
 # ── Workspace app (`pgw serve <path>`) ───────────────────────────────────
 
 
+def _ensure_workspace_app_db() -> None:
+    """Workspace mode also needs the schema for auth (when enabled).
+
+    Single-workspace mode is auth-optional in P9 via ``PGW_AUTH_OPTIONAL``;
+    we still bootstrap the schema so a future user opt-in to auth works
+    without a separate migration step.
+    """
+    import pgw.db.models  # noqa: F401
+    from pgw.db import Base, get_engine
+
+    Base.metadata.create_all(get_engine())
+
+
 def create_workspace_app(workspace: Path) -> FastAPI:
+    _ensure_workspace_app_db()
+
     """Serve a single workspace via the same React SPA, pinned to one path.
 
     The SPA still sees a "library" of size 1 — simpler than maintaining a
