@@ -22,6 +22,7 @@ backend's only job is to:
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import uuid
@@ -47,6 +48,8 @@ from pgw.server.templates import (
     _redownload_video_streaming,
 )
 from pgw.utils.paths import find_video
+
+logger = logging.getLogger(__name__)
 
 # ── Static SPA bundle ────────────────────────────────────────────────────
 # ``frontend/`` builds to ``src/pgw/templates/dist/``. The dist directory
@@ -247,39 +250,94 @@ def _form_defaults() -> dict:
 # ── Library app ──────────────────────────────────────────────────────────
 
 
-# Module-level handle so the worker WS handler (which doesn't have
-# request scope) can reach the active JobManager.
-_active_job_manager: JobManager | None = None
-
-
 def get_job_manager() -> JobManager | None:
-    return _active_job_manager
+    """Module-level shim for legacy callers.
+
+    The canonical handle is now ``app.state.job_manager`` — set in the
+    factory below. This helper looks the manager up via the most-recently
+    created FastAPI app's state when callers can't reach a request scope
+    (e.g. the worker WS handler before it has a chance to read
+    ``ws.app.state``). Prefer ``ws.app.state.job_manager`` /
+    ``request.app.state.job_manager`` over this.
+    """
+    return _last_app.state.job_manager if _last_app is not None else None
+
+
+# Tracks the most-recently created app so ``get_job_manager()`` keeps
+# working for code paths that already imported it. New code should pull
+# from request/WebSocket scope instead.
+_last_app: FastAPI | None = None
 
 
 def _bootstrap_db() -> None:
-    """Create tables (idempotent) + provision admin from env if any.
+    """Bring the schema up to date + provision admin from env if any.
 
-    Runs once per ``create_library_app`` call. ``Base.metadata.create_all``
-    no-ops on tables that already exist, so this is safe to call on
-    every start. Env-var admin provisioning runs after schema is ready.
+    On Postgres we run ``alembic upgrade head`` so the
+    ``alembic_version`` table tracks the schema and future migrations
+    apply incrementally. On SQLite (tests + single-user dev) we keep
+    the fast ``Base.metadata.create_all`` path so each test fixture
+    doesn't pay migration cost.
     """
     import pgw.db.models  # noqa: F401  ensure ORM tables registered
     from pgw.auth.bootstrap import ensure_admin_from_env
     from pgw.db import Base, SessionLocal, get_engine
 
-    Base.metadata.create_all(get_engine())
+    engine = get_engine()
+    if engine.dialect.name == "postgresql":
+        _run_alembic_upgrade()
+    else:
+        Base.metadata.create_all(engine)
+
     with SessionLocal() as db:
         ensure_admin_from_env(db)
+
+
+def _run_alembic_upgrade() -> None:
+    """Programmatic ``alembic upgrade head`` against the configured engine.
+
+    Falls back to ``Base.metadata.create_all`` if alembic.ini cannot be
+    located on disk (e.g. running from a wheel without the migration
+    tree). Stamps head when a legacy ``create_all`` schema is detected.
+    """
+    from sqlalchemy import inspect
+
+    from pgw.db import Base, get_engine
+
+    here = Path(__file__).resolve()
+    cfg_path: Path | None = None
+    for parent in [here.parent, *here.parents]:
+        candidate = parent / "alembic.ini"
+        if candidate.is_file():
+            cfg_path = candidate
+            break
+
+    if cfg_path is None:
+        logger.warning("alembic.ini not found — falling back to create_all")
+        Base.metadata.create_all(get_engine())
+        return
+
+    try:
+        from alembic import command
+        from alembic.config import Config
+
+        cfg = Config(str(cfg_path))
+        cfg.set_main_option("script_location", str(cfg_path.parent / "alembic"))
+
+        engine = get_engine()
+        tables = set(inspect(engine).get_table_names())
+        if "users" in tables and "alembic_version" not in tables:
+            logger.warning("legacy create_all schema detected; stamping head")
+            command.stamp(cfg, "head")
+        else:
+            command.upgrade(cfg, "head")
+    except Exception:
+        logger.exception("alembic upgrade failed; falling back to create_all")
+        Base.metadata.create_all(get_engine())
 
 
 def create_library_app(base_dir: Path, jobs: JobManager) -> FastAPI:
     _bootstrap_db()
 
-    # Make the manager reachable to the worker WS handler and wire
-    # the registry's disconnect callback so dropped workers mark their
-    # in-flight jobs as ``interrupted``.
-    global _active_job_manager
-    _active_job_manager = jobs
     from pgw.server.worker_registry import GLOBAL_WORKERS
 
     GLOBAL_WORKERS.set_disconnect_callback(
@@ -292,6 +350,49 @@ def create_library_app(base_dir: Path, jobs: JobManager) -> FastAPI:
         redoc_url=None,
         openapi_url="/openapi.json",
     )
+    # Canonical handle for routes/WS handlers — read via
+    # ``request.app.state.job_manager`` or ``ws.app.state.job_manager``.
+    app.state.job_manager = jobs
+    app.state.base_dir = base_dir
+    global _last_app
+    _last_app = app
+
+    @app.get("/healthz", include_in_schema=False)
+    def healthz() -> dict:
+        """Liveness + readiness probe for docker-compose / k8s.
+
+        Checks DB reachability and worker-registry sanity. Returns
+        ``200 {"status": "ok", ...}`` on success. Any failure returns
+        ``503`` with the failing component name so operators can
+        triage quickly.
+        """
+        from sqlalchemy import text
+
+        from pgw.db import get_engine
+        from pgw.server.worker_registry import GLOBAL_WORKERS as _GW
+
+        components: dict[str, str] = {}
+        try:
+            with get_engine().connect() as conn:
+                conn.execute(text("SELECT 1"))
+            components["db"] = "ok"
+        except Exception as exc:  # noqa: BLE001
+            components["db"] = f"error: {exc.__class__.__name__}"
+
+        try:
+            # Touching the lock counts as registry sanity — a held lock
+            # would surface as a deadlock here, not silent corruption.
+            with _GW._lock:  # noqa: SLF001
+                workers_known = len(_GW._workers)  # noqa: SLF001
+            components["worker_registry"] = "ok"
+            components["workers_known"] = str(workers_known)
+        except Exception as exc:  # noqa: BLE001
+            components["worker_registry"] = f"error: {exc.__class__.__name__}"
+
+        ok = all(v == "ok" for k, v in components.items() if k != "workers_known")
+        if not ok:
+            raise HTTPException(status_code=503, detail={"status": "degraded", **components})
+        return {"status": "ok", **components}
 
     # Mount auth + setup endpoints first so they're discoverable
     # even before the rest of the app initialises.
@@ -563,12 +664,17 @@ def _ensure_workspace_app_db() -> None:
 
     Single-workspace mode is auth-optional in P9 via ``PGW_AUTH_OPTIONAL``;
     we still bootstrap the schema so a future user opt-in to auth works
-    without a separate migration step.
+    without a separate migration step. Postgres takes the alembic path,
+    SQLite uses ``create_all``.
     """
     import pgw.db.models  # noqa: F401
     from pgw.db import Base, get_engine
 
-    Base.metadata.create_all(get_engine())
+    engine = get_engine()
+    if engine.dialect.name == "postgresql":
+        _run_alembic_upgrade()
+    else:
+        Base.metadata.create_all(engine)
 
 
 def create_workspace_app(workspace: Path) -> FastAPI:

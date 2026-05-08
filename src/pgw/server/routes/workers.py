@@ -275,10 +275,14 @@ async def worker_ws(
         handle = WorkerHandle(user_id=user_id, ws=ws, loop=loop)
         GLOBAL_WORKERS.register(handle)
 
-        # Lazy import — avoid top-level circular with server.app.
-        from pgw.server.app import get_job_manager
+        # Read the manager off the app state so we don't depend on a
+        # module-global. Falls back to the legacy lookup for tests that
+        # mount the WS router on an app where state isn't populated.
+        manager = getattr(ws.app.state, "job_manager", None)
+        if manager is None:
+            from pgw.server.app import get_job_manager
 
-        manager = get_job_manager()
+            manager = get_job_manager()
 
         # Idle loop: relay frames + heartbeat.
         while True:

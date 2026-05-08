@@ -188,6 +188,17 @@ def test_protocol_unknown_frame_raises() -> None:
 # ── Worker registry: reconnect / displacement ────────────────────────────
 
 
+def test_healthz_reports_ok(client: TestClient) -> None:
+    """``GET /healthz`` returns 200 with component status."""
+    r = client.get("/healthz")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["status"] == "ok"
+    assert body["db"] == "ok"
+    assert body["worker_registry"] == "ok"
+    assert "workers_known" in body
+
+
 def test_registry_unregister_with_expected_handle_skips_when_displaced() -> None:
     """A stale ``finally`` must not evict a freshly reconnected worker.
 
