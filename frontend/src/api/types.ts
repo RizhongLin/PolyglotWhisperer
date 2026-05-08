@@ -82,6 +82,8 @@ export interface WorkspaceDetail {
 
 export type FsrsRating = 1 | 2 | 3 | 4;
 
+export type RefineStatus = 'pending' | 'done' | 'failed' | 'skipped';
+
 export interface FlashcardResponse {
   id: number;
   workspace_id: number;
@@ -93,6 +95,17 @@ export interface FlashcardResponse {
   language: string;
   audio_start_ms: number | null;
   audio_end_ms: number | null;
+  /** LLM-refined fields. Render the original front/back if any of
+   * these are missing or refine_status !== 'done'. */
+  lemma: string | null;
+  pos: string | null;
+  definition: string | null;
+  example_source: string | null;
+  example_target: string | null;
+  mnemonic: string | null;
+  refine_status: RefineStatus;
+  refine_model: string | null;
+  refined_at: string | null;
   fsrs_due: string;
   fsrs_stability: number;
   fsrs_difficulty: number;

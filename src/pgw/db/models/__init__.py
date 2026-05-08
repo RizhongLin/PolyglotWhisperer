@@ -6,7 +6,7 @@ which is what Alembic's ``target_metadata`` reads for autogenerate.
 
 from __future__ import annotations
 
-from pgw.db.models.flashcard import Flashcard, FlashcardReview
+from pgw.db.models.flashcard import Flashcard, FlashcardRefinement, FlashcardReview
 from pgw.db.models.user import Session, User
 from pgw.db.models.vocab import VocabEntry, VocabOccurrence
 from pgw.db.models.worker import WorkerSession, WorkerToken
@@ -22,5 +22,6 @@ __all__ = [
     "WorkerToken",
     "WorkerSession",
     "Flashcard",
+    "FlashcardRefinement",
     "FlashcardReview",
 ]

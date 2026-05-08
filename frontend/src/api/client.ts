@@ -212,6 +212,9 @@ export const api = {
   deleteFlashcard: (id: number) =>
     request<void>(`/api/flashcards/${id}`, { method: 'DELETE' }),
 
+  refineFlashcard: (id: number) =>
+    request<FlashcardResponse>(`/api/flashcards/${id}/refine`, { method: 'POST' }),
+
   formDefaults: () => request<FormDefaults>('/api/config/defaults'),
 
   languages: () => request<LanguageInfo[]>('/api/languages'),

@@ -31,6 +31,17 @@ function ReviewPage() {
   const cards = queue.data ?? [];
   const card = cards[index];
 
+  // Poll every 4 s while the current card is still being LLM-refined so
+  // the enriched fields appear without the user having to refresh.
+  // Stops as soon as the card flips to a terminal status.
+  useEffect(() => {
+    if (!card || card.refine_status !== 'pending') return;
+    const handle = setInterval(() => {
+      void queue.refetch();
+    }, 4_000);
+    return () => clearInterval(handle);
+  }, [card?.id, card?.refine_status, queue]);
+
   const audioUrl = useMemo(() => {
     if (!card) return null;
     if (card.audio_start_ms == null || card.audio_end_ms == null) return null;
@@ -42,6 +53,14 @@ function ReviewPage() {
     );
   }, [card]);
 
+  const advance = async () => {
+    if (index + 1 >= cards.length) {
+      await queue.refetch();
+    } else {
+      setIndex(index + 1);
+    }
+  };
+
   const onRate = async (rating: FsrsRating, elapsedMs: number) => {
     if (!card) return;
     setBusy(true);
@@ -49,11 +68,22 @@ function ReviewPage() {
     try {
       await api.reviewFlashcard(card.id, rating, elapsedMs);
       setReviewed((n) => n + 1);
-      if (index + 1 >= cards.length) {
-        await queue.refetch();
-      } else {
-        setIndex(index + 1);
-      }
+      await advance();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : (err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onDiscard = async () => {
+    if (!card) return;
+    if (!confirm('Discard this card permanently?')) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.deleteFlashcard(card.id);
+      await advance();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : (err as Error).message);
     } finally {
@@ -108,7 +138,13 @@ function ReviewPage() {
           </Link>
         </Card>
       ) : (
-        <ReviewCard card={card} audioUrl={audioUrl} onRate={onRate} busy={busy} />
+        <ReviewCard
+          card={card}
+          audioUrl={audioUrl}
+          onRate={onRate}
+          onDiscard={onDiscard}
+          busy={busy}
+        />
       )}
     </div>
   );

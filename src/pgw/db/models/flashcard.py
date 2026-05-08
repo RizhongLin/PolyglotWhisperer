@@ -26,7 +26,9 @@ from sqlalchemy import (
     Index,
     Integer,
     SmallInteger,
+    String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -73,6 +75,21 @@ class Flashcard(Base):
 
     audio_start_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     audio_end_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # ── LLM-refined content ──
+    # Populated asynchronously after card creation by ``pgw.server.flashcard_refine``.
+    # Until ``refine_status`` flips to ``'done'``, the SPA renders the
+    # original ``front``/``back`` fields above as a fallback.
+    lemma: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pos: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    definition: Mapped[str | None] = mapped_column(Text, nullable=True)
+    example_source: Mapped[str | None] = mapped_column(Text, nullable=True)
+    example_target: Mapped[str | None] = mapped_column(Text, nullable=True)
+    mnemonic: Mapped[str | None] = mapped_column(Text, nullable=True)
+    refine_status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    refine_attempts: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
+    refine_model: Mapped[str | None] = mapped_column(Text, nullable=True)
+    refined_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # FSRS state — fsrs.Card maps to (stability, difficulty, state, due, ...).
     # We keep the trio that drives the review queue on the row; the rest is
@@ -121,3 +138,29 @@ class FlashcardReview(Base):
     )
 
     flashcard: Mapped[Flashcard] = relationship(back_populates="reviews")
+
+
+class FlashcardRefinement(Base):
+    """Cache of LLM-produced ``(definition, mnemonic)`` per ``(language, lemma, pos)``.
+
+    Refinement is dictionary-grade for definition/POS — re-running on
+    the same lemma is wasted spend. Example sentences are NOT cached
+    (they're context-dependent on the workspace's transcript).
+    """
+
+    __tablename__ = "flashcard_refinements"
+    __table_args__ = (
+        UniqueConstraint("language", "lemma", "pos", name="uq_flashcard_refinements_natural_key"),
+        Index("ix_flashcard_refinements_lookup", "language", "lemma", "pos"),
+    )
+
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
+    language: Mapped[str] = mapped_column(String(8), nullable=False)
+    lemma: Mapped[str] = mapped_column(Text, nullable=False)
+    pos: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    definition: Mapped[str] = mapped_column(Text, nullable=False)
+    mnemonic: Mapped[str | None] = mapped_column(Text, nullable=True)
+    model: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )

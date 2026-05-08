@@ -10,7 +10,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session as SqlaSession
@@ -62,6 +62,17 @@ class FlashcardResponse(BaseModel):
     language: str
     audio_start_ms: int | None
     audio_end_ms: int | None
+    # LLM-refined content. ``refine_status`` is one of:
+    # ``pending`` | ``done`` | ``failed`` | ``skipped``.
+    lemma: str | None
+    pos: str | None
+    definition: str | None
+    example_source: str | None
+    example_target: str | None
+    mnemonic: str | None
+    refine_status: str
+    refine_model: str | None
+    refined_at: datetime | None
     fsrs_due: datetime
     fsrs_stability: float
     fsrs_difficulty: float
@@ -85,6 +96,15 @@ def _to_response(card: Flashcard) -> FlashcardResponse:
         language=card.language,
         audio_start_ms=card.audio_start_ms,
         audio_end_ms=card.audio_end_ms,
+        lemma=card.lemma,
+        pos=card.pos,
+        definition=card.definition,
+        example_source=card.example_source,
+        example_target=card.example_target,
+        mnemonic=card.mnemonic,
+        refine_status=card.refine_status,
+        refine_model=card.refine_model,
+        refined_at=card.refined_at,
         fsrs_due=card.fsrs_due,
         fsrs_stability=card.fsrs_stability,
         fsrs_difficulty=card.fsrs_difficulty,
@@ -104,6 +124,7 @@ def _to_response(card: Flashcard) -> FlashcardResponse:
 )
 def create_flashcard(
     payload: CreateFlashcardRequest,
+    background_tasks: BackgroundTasks,
     user: User = Depends(current_user),
     db: SqlaSession = Depends(get_session),
 ) -> FlashcardResponse:
@@ -149,6 +170,49 @@ def create_flashcard(
     db.add(card)
     db.commit()
     db.refresh(card)
+
+    # Schedule async LLM refinement so the click-to-save loop stays
+    # snappy. The card is already persisted with a usable ``back``
+    # text; refinement enriches it within seconds (or skips silently
+    # when no LLM is configured).
+    from pgw.server.flashcard_refine import refine_card_ids as _refine
+
+    background_tasks.add_task(_refine, [card.id])
+
+    return _to_response(card)
+
+
+@router.post(
+    "/{card_id}/refine",
+    response_model=FlashcardResponse,
+    dependencies=[Depends(verify_csrf)],
+)
+def refine_one(
+    card_id: int,
+    background_tasks: BackgroundTasks,
+    user: User = Depends(current_user),
+    db: SqlaSession = Depends(get_session),
+) -> FlashcardResponse:
+    """Re-enqueue a single card for LLM refinement.
+
+    Useful when the original refinement failed (``refine_status='failed'``)
+    or when the user wants a fresh pass on a card whose back text they
+    just edited.
+    """
+    card = db.scalar(select(Flashcard).where(Flashcard.id == card_id, Flashcard.user_id == user.id))
+    if card is None:
+        raise HTTPException(
+            status_code=404,
+            detail=envelope(Err.FLASHCARD_NOT_FOUND, "flashcard not found"),
+        )
+    card.refine_status = "pending"
+    card.refine_attempts = 0
+    db.commit()
+    db.refresh(card)
+
+    from pgw.server.flashcard_refine import refine_card_ids as _refine
+
+    background_tasks.add_task(_refine, [card.id])
     return _to_response(card)
 
 
