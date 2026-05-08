@@ -11,15 +11,21 @@ services:
       # DOCKER DEV: mount host-built dist/ for instant frontend updates
       # and set PGW_SPA_DIR=/spa in environment:
       # - ./src/pgw/templates/dist:/spa
+    # Pick up secrets + admin bootstrap from .env (gitignored). Anything
+    # in ``environment:`` below wins over ``.env`` — keep operator vars
+    # there and per-deployment secrets in .env.
+    env_file:
+      - path: .env
+        required: false
     environment:
       - PGW_WORKSPACE_DIR=/data/pgw_workspace
       - PGW_SERVE_HOST=0.0.0.0
       - PGW_SERVE_MAX_JOBS=1
       - PGW_DATABASE_URL=postgresql+psycopg://pgw:pgw@postgres:5432/pgw_dev
-      - PGW_SECRET_KEY=change-me-in-production
-      # API keys — set in .env or pass directly:
-      # - GROQ_API_KEY=${GROQ_API_KEY}
-      # - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # PGW_SECRET_KEY, PGW_ADMIN_EMAIL, PGW_ADMIN_PASSWORD, and provider
+      # API keys (GROQ_API_KEY etc.) come from the .env file. Generate a
+      # strong secret with:
+      #   python -c "import secrets; print(secrets.token_urlsafe(32))"
       # Frontend dev override (mount dist/ and set PGW_SPA_DIR=/spa):
       # - PGW_SPA_DIR=/spa
     # Inherit ENTRYPOINT from the Dockerfile (`pgw-entrypoint`) so the

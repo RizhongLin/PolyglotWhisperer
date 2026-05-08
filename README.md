@@ -41,6 +41,37 @@ docker compose logs -f pgw      # entrypoint runs `pgw maintenance migrate` befo
 
 The container's entrypoint (`docker/entrypoint.sh`) runs migrations automatically whenever `PGW_DATABASE_URL` is set, so you never need to invoke alembic by hand on the production path.
 
+### Admin bootstrap + secrets
+
+`docker-compose.yml` reads your local `.env` (gitignored) for runtime secrets and the admin bootstrap. The variables that matter:
+
+```env
+# Auto-create the admin on first boot — survives `docker compose down -v`
+PGW_ADMIN_EMAIL=admin@example.com
+PGW_ADMIN_PASSWORD=change-me-strong-password
+
+# CSRF + signed-URL key (REQUIRED in production; auto-random in dev)
+PGW_SECRET_KEY=<run: python -c "import secrets; print(secrets.token_urlsafe(32))">
+
+# Provider keys (anything LiteLLM/OpenAI-compatible reads)
+GROQ_API_KEY=...
+OPENAI_API_KEY=...
+```
+
+`PGW_ADMIN_*` is consumed by `ensure_admin_from_env` on every server start: if no users exist yet, the admin is created from those credentials. Idempotent — once an admin exists the env vars are ignored.
+
+### Why does my admin disappear when I rebuild?
+
+It doesn't — but `docker compose down -v` does. The `-v` flag wipes named volumes, including `pgw_pg_data` where the Postgres database lives. For routine rebuilds:
+
+```bash
+docker compose down                  # keeps the volume → admin persists
+docker compose build pgw
+docker compose up -d
+```
+
+Use `-v` only when you want a deliberately fresh database (e.g., testing the migration path on empty Postgres). With `PGW_ADMIN_EMAIL`/`PGW_ADMIN_PASSWORD` set in `.env`, even a `down -v` recovers cleanly — the next boot recreates the admin from env.
+
 ## Basic Usage
 
 ```bash
