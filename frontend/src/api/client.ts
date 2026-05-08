@@ -172,6 +172,12 @@ export const api = {
       `/api/workspaces/${encodeURIComponent(slug)}/${encodeURIComponent(ts)}/vocab`,
     ),
 
+  markEmbedBlocked: (slug: string, ts: string) =>
+    request<void>(
+      `/api/workspaces/${encodeURIComponent(slug)}/${encodeURIComponent(ts)}/embed-blocked`,
+      { method: 'POST' },
+    ),
+
   formDefaults: () => request<FormDefaults>('/api/config/defaults'),
 
   languages: () => request<LanguageInfo[]>('/api/languages'),

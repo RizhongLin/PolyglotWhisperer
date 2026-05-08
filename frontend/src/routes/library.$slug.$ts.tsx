@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, createFileRoute } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -26,6 +26,10 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonClass } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import type { PlayerAdapter } from '@/components/player/PlayerAdapter';
+import { UnavailablePlayer } from '@/components/player/UnavailablePlayer';
+import { VimeoPlayer } from '@/components/player/VimeoPlayer';
+import { YoutubePlayer } from '@/components/player/YoutubePlayer';
 import { api } from '@/api/client';
 import type { SubtitleTrack, VocabSummary, VocabWord, WorkspaceDetail } from '@/api/types';
 import { cn } from '@/lib/cn';
@@ -105,39 +109,45 @@ function PlayerLayout({ detail, vocab, slug, ts }: LayoutProps) {
   const [currentTime, setCurrentTime] = useState(0);
 
   const videoRef = useRef<HTMLVideoElement>(null);
+  const adapterRef = useRef<PlayerAdapter | null>(null);
   const restoredRef = useRef(false);
   const syncingRef = useRef(false);
+
+  // Embed routing — switch to provider iframe when available, fall back
+  // to HTML5 if the embed refuses to load (X-Frame-Options).
+  const [embedRefused, setEmbedRefused] = useState(false);
+  const useEmbed = !embedRefused && detail.embed != null;
+  const handleEmbedRefused = useCallback(() => {
+    setEmbedRefused(true);
+    // Persist so we don't re-attempt the broken embed on the next visit.
+    void api.markEmbedBlocked(slug, ts).catch(() => undefined);
+  }, [slug, ts]);
 
   // Persist selected track.
   useEffect(() => {
     if (activeTrack) localStorage.setItem(pk, activeTrack.label);
   }, [activeTrack, pk]);
 
-  // Restore last playback position after video metadata loads.
+  // Restore last playback position once the active adapter is ready.
   useEffect(() => {
-    const v = videoRef.current;
-    if (!v || restoredRef.current) return;
-    const handler = () => {
+    const a = adapterRef.current;
+    if (!a || restoredRef.current) return;
+    const unsub = a.onReady(() => {
       const saved = localStorage.getItem(tk);
       if (saved != null) {
         const sec = Number(saved);
-        if (Number.isFinite(sec) && sec > 1) v.currentTime = sec;
+        if (Number.isFinite(sec) && sec > 1) a.seek(sec);
       }
       restoredRef.current = true;
-    };
-    if (v.readyState >= 1) {
-      handler();
-    } else {
-      v.addEventListener('loadedmetadata', handler, { once: true });
-    }
-  }, [videoSrc, tk]);
+    });
+    return unsub;
+  }, [useEmbed, videoSrc, tk]);
 
-  // Periodically persist playback position.
+  // Periodically persist playback position from whichever adapter is active.
   useEffect(() => {
     const interval = setInterval(() => {
-      const v = videoRef.current;
-      if (!v || v.paused) return;
-      localStorage.setItem(tk, String(v.currentTime));
+      const t = adapterRef.current?.getCurrentTime() ?? 0;
+      if (t > 0) localStorage.setItem(tk, String(t));
     }, 5_000);
     return () => clearInterval(interval);
   }, [tk]);
@@ -209,48 +219,56 @@ function PlayerLayout({ detail, vocab, slug, ts }: LayoutProps) {
     return () => v.textTracks.removeEventListener('change', sync);
   }, [detail.tracks, videoSrc]);
 
-  // Subscribe to <video> timeupdate (RAF-throttled) to drive transcript.
+  // Subscribe to the active adapter for time updates (drives transcript).
+  // The adapter fires at provider cadence (HTML5 = ~4–66Hz, YouTube = 4Hz);
+  // we RAF-throttle the setState to keep transcript renders cheap.
   useEffect(() => {
-    const v = videoRef.current;
-    if (!v) return;
+    const a = adapterRef.current;
+    if (!a) return;
     let rafId: number | null = null;
-    const tick = () => {
+    const unsub = a.onTime((t) => {
       if (rafId) return;
       rafId = requestAnimationFrame(() => {
-        setCurrentTime(v.currentTime);
+        setCurrentTime(t);
         rafId = null;
       });
-    };
-    v.addEventListener('timeupdate', tick);
+    });
     return () => {
-      v.removeEventListener('timeupdate', tick);
+      unsub();
       if (rafId) cancelAnimationFrame(rafId);
     };
-  }, [videoSrc]);
+  }, [useEmbed, videoSrc]);
 
   const seekTo = (sec: number) => {
-    const v = videoRef.current;
-    if (!v) return;
-    v.currentTime = Math.max(0, sec - 0.05);
-    void v.play();
+    const a = adapterRef.current;
+    if (!a) return;
+    a.seek(Math.max(0, sec - 0.05));
+    // HTML5 path also auto-plays after seek; embed adapters handle that
+    // themselves (or the iframe player behaves natively on click).
+    if (videoRef.current) void videoRef.current.play();
   };
 
-  // Keyboard shortcuts
+  // Keyboard shortcuts — use adapter for arrow seeks (works for embeds);
+  // space toggles play/pause, which only the HTML5 path supports natively.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      const v = videoRef.current;
-      if (!v) return;
+      const a = adapterRef.current;
+      if (!a) return;
       const tag = document.activeElement?.tagName.toLowerCase();
       if (tag === 'input' || tag === 'textarea') return;
 
       switch (e.key) {
         case 'ArrowLeft':
-          v.currentTime = Math.max(0, v.currentTime - 5);
+          a.seek(Math.max(0, a.getCurrentTime() - 5));
           break;
-        case 'ArrowRight':
-          v.currentTime = Math.min(v.duration || Infinity, v.currentTime + 5);
+        case 'ArrowRight': {
+          const d = a.getDuration();
+          a.seek(Math.min(d || Infinity, a.getCurrentTime() + 5));
           break;
+        }
         case ' ': {
+          const v = videoRef.current;
+          if (!v) break;
           const btn = (e.target as HTMLElement)?.closest('button, a, [role=button]');
           if (!btn) {
             e.preventDefault();
@@ -258,19 +276,30 @@ function PlayerLayout({ detail, vocab, slug, ts }: LayoutProps) {
           }
           break;
         }
-        case 'f':
+        case 'f': {
+          // Fullscreen + playback-rate keys are HTML5-only; embeds
+          // ignore them. Provider iframes have their own native keys.
+          const v = videoRef.current;
+          if (!v) break;
           if (document.fullscreenElement) document.exitFullscreen();
           else v.requestFullscreen();
           break;
-        case '1':
-          v.playbackRate = 0.75;
+        }
+        case '1': {
+          const v = videoRef.current;
+          if (v) v.playbackRate = 0.75;
           break;
-        case '2':
-          v.playbackRate = 1.0;
+        }
+        case '2': {
+          const v = videoRef.current;
+          if (v) v.playbackRate = 1.0;
           break;
-        case '3':
-          v.playbackRate = 1.5;
+        }
+        case '3': {
+          const v = videoRef.current;
+          if (v) v.playbackRate = 1.5;
           break;
+        }
       }
     };
     document.addEventListener('keydown', handler);
@@ -308,9 +337,62 @@ function PlayerLayout({ detail, vocab, slug, ts }: LayoutProps) {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[2fr_1fr]">
         <div className="flex flex-col gap-4">
           <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
-            {videoSrc ? (
+            {useEmbed && detail.embed?.provider === 'youtube' ? (
+              <YoutubePlayer
+                ref={adapterRef}
+                videoId={detail.embed.video_id}
+                className="aspect-video w-full bg-black"
+                onEmbedRefused={handleEmbedRefused}
+              />
+            ) : useEmbed && detail.embed?.provider === 'vimeo' ? (
+              <VimeoPlayer
+                ref={adapterRef}
+                videoId={detail.embed.video_id}
+                className="aspect-video w-full bg-black"
+                onEmbedRefused={handleEmbedRefused}
+              />
+            ) : videoSrc ? (
               <video
-                ref={videoRef}
+                ref={(el) => {
+                  videoRef.current = el;
+                  if (!el) {
+                    adapterRef.current = null;
+                    return;
+                  }
+                  // Build a minimal HTML5 adapter inline so we don't need
+                  // to refactor the textTracks-based track switcher below.
+                  const timeHandlers = new Set<(s: number) => void>();
+                  const readyHandlers = new Set<() => void>();
+                  let readyFired = false;
+                  const onTime = () => timeHandlers.forEach((h) => h(el.currentTime));
+                  const onMeta = () => {
+                    readyFired = true;
+                    readyHandlers.forEach((h) => h());
+                    readyHandlers.clear();
+                  };
+                  el.addEventListener('timeupdate', onTime);
+                  el.addEventListener('loadedmetadata', onMeta);
+                  adapterRef.current = {
+                    getCurrentTime: () => el.currentTime,
+                    getDuration: () =>
+                      Number.isFinite(el.duration) && el.duration ? el.duration : 0,
+                    seek: (s) => {
+                      el.currentTime = s;
+                    },
+                    onTime: (h) => {
+                      timeHandlers.add(h);
+                      return () => timeHandlers.delete(h);
+                    },
+                    onReady: (h) => {
+                      if (readyFired) {
+                        h();
+                        return () => undefined;
+                      }
+                      readyHandlers.add(h);
+                      return () => readyHandlers.delete(h);
+                    },
+                  };
+                }}
                 src={videoSrc}
                 controls
                 className="aspect-video w-full bg-black"
@@ -328,15 +410,34 @@ function PlayerLayout({ detail, vocab, slug, ts }: LayoutProps) {
                 ))}
               </video>
             ) : (
-              <div className="flex aspect-video w-full flex-col items-center justify-center gap-3 bg-muted text-muted-foreground">
-                <FileVideo className="size-10" />
-                <span className="text-sm">Video file missing</span>
-                {meta.source_url ? (
-                  <RedownloadButton slug={slug} ts={ts} />
-                ) : null}
-              </div>
+              <UnavailablePlayer
+                ref={adapterRef}
+                reason={
+                  meta.source_url
+                    ? 'The video file is not on this server. Re-download to play locally.'
+                    : 'No source URL on file and no local video — transcript-only view.'
+                }
+              />
             )}
           </div>
+          {/* Footer link: surface the source URL when an embed is active so
+              users can hop to the original site for full features. */}
+          {useEmbed && meta.source_url ? (
+            <p className="text-[11px] text-muted-foreground">
+              Playing via {detail.embed?.provider}.{' '}
+              <a
+                href={meta.source_url}
+                target="_blank"
+                rel="noreferrer"
+                className="underline hover:text-foreground"
+              >
+                Open original
+              </a>
+            </p>
+          ) : null}
+          {!videoSrc && meta.source_url && !useEmbed ? (
+            <RedownloadButton slug={slug} ts={ts} />
+          ) : null}
 
           {detail.tracks.length > 0 ? (
             <Card className="p-3">

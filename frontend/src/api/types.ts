@@ -59,6 +59,12 @@ export interface WorkspaceMeta {
   created_at?: string;
 }
 
+export interface EmbedTarget {
+  provider: 'youtube' | 'vimeo';
+  url: string;
+  video_id: string;
+}
+
 export interface WorkspaceDetail {
   slug: string;
   timestamp: string;
@@ -66,6 +72,7 @@ export interface WorkspaceDetail {
   tracks: SubtitleTrack[];
   files: WorkspaceFile[];
   video: string | null;
+  embed: EmbedTarget | null;
   siblings: Array<{ slug: string; timestamp: string }>;
 }
 

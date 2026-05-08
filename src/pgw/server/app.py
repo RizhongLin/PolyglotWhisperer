@@ -183,6 +183,8 @@ def _workspace_summary(ws: dict) -> dict:
 
 def _workspace_detail(workspace: Path, base_dir: Path) -> dict:
     """Full workspace blob: metadata + tracks + downloadable files + sibling list."""
+    from pgw.server.embed import detect_embed
+
     meta = _load_metadata(workspace)
     siblings = _find_sibling_workspaces(workspace, base_dir)
     tracks = _discover_tracks(workspace, sibling_paths=siblings)
@@ -202,6 +204,17 @@ def _workspace_detail(workspace: Path, base_dir: Path) -> dict:
             }
         )
     video = find_video(workspace)
+    # Embed block: provider-native iframe target for YouTube / Vimeo.
+    # Suppressed when the user has marked the embed as blocked
+    # (X-Frame-Options refusal) so the SPA falls back to HTML5.
+    embed_block: dict | None = None
+    target = detect_embed(meta.get("source_url"))
+    if target is not None and not meta.get("embed_blocked"):
+        embed_block = {
+            "provider": target.provider,
+            "url": target.embed_url,
+            "video_id": target.video_id,
+        }
     return {
         "slug": workspace.parent.name,
         "timestamp": workspace.name,
@@ -209,8 +222,25 @@ def _workspace_detail(workspace: Path, base_dir: Path) -> dict:
         "tracks": tracks,
         "files": files_index,
         "video": video.name if video is not None else None,
+        "embed": embed_block,
         "siblings": [{"slug": sp.parent.name, "timestamp": sp.name} for sp in siblings],
     }
+
+
+def _mark_workspace_embed_blocked(workspace: Path) -> None:
+    """Persist ``embed_blocked: true`` to the workspace metadata.json.
+
+    Called when the SPA detects that the provider iframe refused to
+    load (X-Frame-Options / CSP) so subsequent visits don't re-attempt
+    the broken embed.
+    """
+    meta_path = workspace / "metadata.json"
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.is_file() else {}
+    except (json.JSONDecodeError, OSError):
+        meta = {}
+    meta["embed_blocked"] = True
+    meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def _read_vocab(workspace: Path) -> dict | None:
@@ -433,6 +463,19 @@ def create_library_app(base_dir: Path, jobs: JobManager) -> FastAPI:
         if vocab is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "No vocabulary file found")
         return vocab
+
+    @app.post(
+        "/api/workspaces/{slug}/{timestamp}/embed-blocked",
+        status_code=status.HTTP_204_NO_CONTENT,
+    )
+    def api_mark_embed_blocked(slug: str, timestamp: str) -> None:
+        """Persist that the provider iframe refused to load.
+
+        The SPA detects X-Frame-Options refusal client-side and POSTs
+        here so we don't retry the same broken embed on the next visit.
+        """
+        workspace = _validate_ws(slug, timestamp, base_dir)
+        _mark_workspace_embed_blocked(workspace)
 
     @app.get("/api/config/defaults")
     def api_form_defaults() -> dict:
