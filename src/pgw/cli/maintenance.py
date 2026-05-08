@@ -15,6 +15,69 @@ maintenance_app = typer.Typer(
 console = Console()
 
 
+@maintenance_app.command("backfill-flashcards")
+def backfill_flashcards(
+    owner_email: str = typer.Option(
+        ...,
+        "--owner",
+        help="Email of the user whose vocab to materialise as flashcards.",
+    ),
+    language: str | None = typer.Option(
+        None,
+        "--language",
+        help="Optional ISO code filter (e.g. 'fr'). Default: all languages.",
+    ),
+    require_translation: bool = typer.Option(
+        True,
+        "--require-translation/--allow-empty-back",
+        help="Skip vocab entries whose first occurrence has no translation.",
+    ),
+    limit: int | None = typer.Option(
+        None,
+        "--limit",
+        help="Optional cap on cards created in this run (spot-testing).",
+    ),
+) -> None:
+    """Bulk-create flashcards from existing vocab entries.
+
+    Idempotent — vocab entries already carded for the user are skipped
+    via ``flashcards.vocab_entry_id``. Re-run safely after each new
+    pipeline run to materialise newly-discovered words.
+    """
+    from sqlalchemy import select
+
+    import pgw.db.models  # noqa: F401  ensure ORM tables registered
+    from pgw.db import Base, SessionLocal, get_engine
+    from pgw.db.models.user import User
+    from pgw.maintenance.flashcards_backfill import run as run_backfill
+
+    Base.metadata.create_all(get_engine())
+
+    with SessionLocal() as db:
+        owner = db.scalar(select(User).where(User.email == owner_email.lower()))
+        if owner is None:
+            console.print(
+                f"[red]no such user:[/] {owner_email}. "
+                f"Create one first with [bold]pgw admin create-user --admin {owner_email}[/]."
+            )
+            raise typer.Exit(code=1)
+
+        report = run_backfill(
+            db,
+            owner=owner,
+            language=language,
+            require_translation=require_translation,
+            limit=limit,
+        )
+        console.print(
+            f"[green]flashcard backfill complete[/]\n"
+            f"  cards created:           {report.cards_created}\n"
+            f"  skipped (already done):  {report.skipped_already_exists}\n"
+            f"  skipped (no translation): {report.skipped_no_translation}\n"
+            f"  skipped (no occurrence): {report.skipped_no_occurrence}"
+        )
+
+
 @maintenance_app.command("migrate")
 def migrate() -> None:
     """Run ``alembic upgrade head`` against the configured database.
