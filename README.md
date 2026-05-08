@@ -167,7 +167,8 @@ Pages:
 
 - **Library** (`/library`) — workspace grid with thumbnails, language pair, difficulty, dates. Click any card to open the player.
 - **Studio** (`/studio`) — paste a URL or drop a file, pick source + target language from dropdowns, choose where to run (auto / worker / server), hit _Start_. Live progress cards stream events from the backend; cancel any time, close the tab and come back without losing state. Advanced flags (backends, models, chunk size, ffmpeg start/duration, refine, subs) are tucked behind a disclosure.
-- **Player** (`/library/<slug>/<ts>`) — HTML5 video, click-to-seek transcript with anticipate/linger windows, track switcher (bilingual / original / translation), vocab card (top rare words + difficulty), downloads card, re-download fallback for missing video files.
+- **Player** (`/library/<slug>/<ts>`) — HTML5 / YouTube / Vimeo video via the `PlayerAdapter` switch (auto-falls-back to HTML5 when an embed refuses), click-to-seek transcript with anticipate/linger windows, track switcher (bilingual / original / translation), vocab card with click-to-save flashcards, downloads card.
+- **Review** (`/review`) — FSRS spaced-repetition queue: due cards stream one-at-a-time, reveal answer, grade Again/Hard/Good/Easy, optional 🗑 Discard. Audio clip auto-plays per card when the workspace has a saved range.
 
 Backend is **FastAPI + uvicorn** serving JSON over `/api/...` and raw workspace files over `/ws/<slug>/<ts>/<file>`. Job state is persisted as append-only JSONL under `<workspace>/.jobs/`, so an in-flight job survives a browser refresh and the server's restart marks orphaned jobs as `interrupted` rather than leaving them stuck.
 
@@ -191,6 +192,23 @@ When the DB has no users, `pgw serve` runs in **bootstrap mode** — the SPA ser
 ### Workers
 
 `pgw worker connect --server <url> --token <t>` runs the pipeline on the user's machine using their own IP, GPU, and API keys. The remote `pgw serve` becomes a thin orchestrator + library surface; videos and big artifacts stay local. On the server side, manage tokens with `POST /api/workers`, `GET /api/workers`, `DELETE /api/workers/{id}`. In the Studio, select where to run each job — Auto (prefer connected worker), This machine (explicit worker), or Server (admin-only). When a worker disconnects, its in-flight jobs are marked `interrupted` and any open NDJSON stream reflects it.
+
+### Flashcards + spaced repetition
+
+Click a vocab word in the player transcript → "Save flashcard" pre-fills front/back/audio range. Cards land in `/review` ordered by FSRS due time; rate Again (1) / Hard (2) / Good (3) / Easy (4) and the algorithm reschedules. The 🗑 Discard button on each card removes it permanently.
+
+When `PGW_LLM__API_KEY` is configured, every new card schedules a background LLM pass that adds: dictionary lemma, POS tag, polished definition, an example sentence pair, and (optionally) a mnemonic. Results land within seconds; the SPA polls until `refine_status === 'done'`. A per-`(language, lemma, pos)` cache means repeat surfaces are free.
+
+Bulk-create cards from existing vocab:
+
+```bash
+pgw maintenance backfill-flashcards --owner you@example.com [--language fr] [--limit 50]
+```
+
+Knobs (in `.env`):
+
+- `PGW_FLASHCARD_REFINE=0` — disable LLM enrichment entirely (cards still save with original `back`).
+- `PGW_FLASHCARD_REFINE_MNEMONIC=1` — enable mnemonics (off by default; ~2× output tokens).
 
 ## Vocabulary
 
