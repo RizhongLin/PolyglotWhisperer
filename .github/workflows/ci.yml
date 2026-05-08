@@ -46,5 +46,10 @@ jobs:
           version: "latest"
       - run: uv python install ${{ matrix.python-version }}
       - run: uv sync --all-extras --dev --python ${{ matrix.python-version }}
-      - run: uv run python -m spacy download fr_core_news_sm it_core_news_sm ca_core_news_sm
+      # ``spacy download`` only resolves the GitHub URL for the first
+      # model on the line — pip then chokes on the rest because they
+      # aren't on PyPI. Run one model per invocation.
+      - run: uv run python -m spacy download fr_core_news_sm
+      - run: uv run python -m spacy download it_core_news_sm
+      - run: uv run python -m spacy download ca_core_news_sm
       - run: uv run pytest tests/ -v
