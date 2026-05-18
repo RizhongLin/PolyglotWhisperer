@@ -248,3 +248,54 @@ export type JobEvent =
       ts: number;
     }
   | { type: 'heartbeat'; ts: number };
+
+// ── Credentials & preferences ──
+
+export interface Credential {
+  id: number;
+  service: string;
+  provider: string;
+  masked_key: string;
+  api_base: string | null;
+  api_model: string | null;
+  created_at: string;
+}
+
+export interface CredentialCreate {
+  service: string;
+  provider: string;
+  api_key: string;
+  api_base?: string | null;
+  api_model?: string | null;
+}
+
+export interface Preferences {
+  language?: string;
+  translate?: string;
+  backend?: string;
+  llm_backend?: string;
+}
+
+export interface ChangePasswordRequest {
+  current_password: string;
+  new_password: string;
+}
+
+// ── Admin ──
+
+export interface AdminUser {
+  id: number;
+  email: string;
+  is_admin: boolean;
+  created_at: string;
+}
+
+export interface CreateUserRequest {
+  email: string;
+  password: string;
+  is_admin: boolean;
+}
+
+export interface ResetPasswordRequest {
+  password: string;
+}

@@ -9,9 +9,10 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from pgw.db.base import Base
-from pgw.db.types import BigIntPK
+from pgw.db.types import BigIntPK, JSONText
 
 if TYPE_CHECKING:
+    from pgw.db.models.credential import UserCredential
     from pgw.db.models.workspace import Workspace, WorkspaceJob
 
 
@@ -22,16 +23,11 @@ def _utcnow() -> datetime:
 class User(Base):
     __tablename__ = "users"
 
-    # BigInteger to match alembic migration 0002. SQLite treats both
-    # Integer and BigInteger as INTEGER, but Postgres differs — keeping
-    # ORM and Alembic in sync prevents `Base.metadata.create_all()`
-    # diverging from migration-driven schema.
     id: Mapped[int] = mapped_column(BigIntPK, primary_key=True, autoincrement=True)
-    # CITEXT on Postgres; TEXT on SQLite. Store lower-cased emails to
-    # keep behavior portable.
     email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
     is_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    preferences: Mapped[dict] = mapped_column(JSONText, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )
@@ -47,6 +43,9 @@ class User(Base):
     )
     jobs: Mapped[list["WorkspaceJob"]] = relationship(
         back_populates="owner", cascade="all, delete-orphan"
+    )
+    credentials: Mapped[list["UserCredential"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
     )
 
 

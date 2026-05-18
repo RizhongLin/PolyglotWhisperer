@@ -1,6 +1,11 @@
 import type {
+  AdminUser,
   AuthState,
   CreateFlashcardRequest,
+  CreateUserRequest,
+  Credential,
+  CredentialCreate,
+  ChangePasswordRequest,
   FlashcardResponse,
   FormDefaults,
   FsrsRating,
@@ -9,6 +14,8 @@ import type {
   JobRecord,
   LanguageInfo,
   MeResponse,
+  Preferences,
+  ResetPasswordRequest,
   VocabSummary,
   WorkerSummary,
   WorkspaceDetail,
@@ -245,6 +252,61 @@ export const api = {
       body: fd,
     });
   },
+
+  // ── Credentials & preferences ──
+
+  credentials: () => request<Credential[]>('/api/auth/credentials'),
+
+  createCredential: (payload: CredentialCreate) =>
+    request<{ ok: boolean; id: number }>('/api/auth/credentials', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+
+  deleteCredential: (id: number) =>
+    request<void>(`/api/auth/credentials/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    }),
+
+  preferences: () => request<Preferences>('/api/auth/preferences'),
+
+  updatePreferences: (payload: Preferences) =>
+    request<{ ok: boolean }>('/api/auth/preferences', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+
+  changePassword: (payload: ChangePasswordRequest) =>
+    request<{ ok: boolean }>('/api/auth/password', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+
+  // ── Admin ──
+
+  adminUsers: () => request<AdminUser[]>('/api/admin/users'),
+
+  adminCreateUser: (payload: CreateUserRequest) =>
+    request<{ ok: boolean }>('/api/admin/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+
+  adminResetPassword: (userId: number, payload: ResetPasswordRequest) =>
+    request<{ ok: boolean }>(`/api/admin/users/${encodeURIComponent(userId)}/password`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+
+  adminDeleteUser: (userId: number) =>
+    request<void>(`/api/admin/users/${encodeURIComponent(userId)}`, {
+      method: 'DELETE',
+    }),
 };
 
 /**

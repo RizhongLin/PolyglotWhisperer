@@ -11,11 +11,13 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as StudioRouteImport } from './routes/studio'
 import { Route as SetupRouteImport } from './routes/setup'
+import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ReviewRouteImport } from './routes/review'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as LibraryRouteImport } from './routes/library'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as LibraryIndexRouteImport } from './routes/library.index'
+import { Route as AdminUsersRouteImport } from './routes/admin.users'
 import { Route as LibrarySlugTsRouteImport } from './routes/library.$slug.$ts'
 
 const StudioRoute = StudioRouteImport.update({
@@ -26,6 +28,11 @@ const StudioRoute = StudioRouteImport.update({
 const SetupRoute = SetupRouteImport.update({
   id: '/setup',
   path: '/setup',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ReviewRoute = ReviewRouteImport.update({
@@ -53,6 +60,11 @@ const LibraryIndexRoute = LibraryIndexRouteImport.update({
   path: '/',
   getParentRoute: () => LibraryRoute,
 } as any)
+const AdminUsersRoute = AdminUsersRouteImport.update({
+  id: '/admin/users',
+  path: '/admin/users',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LibrarySlugTsRoute = LibrarySlugTsRouteImport.update({
   id: '/$slug/$ts',
   path: '/$slug/$ts',
@@ -64,8 +76,10 @@ export interface FileRoutesByFullPath {
   '/library': typeof LibraryRouteWithChildren
   '/login': typeof LoginRoute
   '/review': typeof ReviewRoute
+  '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
   '/studio': typeof StudioRoute
+  '/admin/users': typeof AdminUsersRoute
   '/library/': typeof LibraryIndexRoute
   '/library/$slug/$ts': typeof LibrarySlugTsRoute
 }
@@ -73,8 +87,10 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/review': typeof ReviewRoute
+  '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
   '/studio': typeof StudioRoute
+  '/admin/users': typeof AdminUsersRoute
   '/library': typeof LibraryIndexRoute
   '/library/$slug/$ts': typeof LibrarySlugTsRoute
 }
@@ -84,8 +100,10 @@ export interface FileRoutesById {
   '/library': typeof LibraryRouteWithChildren
   '/login': typeof LoginRoute
   '/review': typeof ReviewRoute
+  '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
   '/studio': typeof StudioRoute
+  '/admin/users': typeof AdminUsersRoute
   '/library/': typeof LibraryIndexRoute
   '/library/$slug/$ts': typeof LibrarySlugTsRoute
 }
@@ -96,8 +114,10 @@ export interface FileRouteTypes {
     | '/library'
     | '/login'
     | '/review'
+    | '/settings'
     | '/setup'
     | '/studio'
+    | '/admin/users'
     | '/library/'
     | '/library/$slug/$ts'
   fileRoutesByTo: FileRoutesByTo
@@ -105,8 +125,10 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/review'
+    | '/settings'
     | '/setup'
     | '/studio'
+    | '/admin/users'
     | '/library'
     | '/library/$slug/$ts'
   id:
@@ -115,8 +137,10 @@ export interface FileRouteTypes {
     | '/library'
     | '/login'
     | '/review'
+    | '/settings'
     | '/setup'
     | '/studio'
+    | '/admin/users'
     | '/library/'
     | '/library/$slug/$ts'
   fileRoutesById: FileRoutesById
@@ -126,8 +150,10 @@ export interface RootRouteChildren {
   LibraryRoute: typeof LibraryRouteWithChildren
   LoginRoute: typeof LoginRoute
   ReviewRoute: typeof ReviewRoute
+  SettingsRoute: typeof SettingsRoute
   SetupRoute: typeof SetupRoute
   StudioRoute: typeof StudioRoute
+  AdminUsersRoute: typeof AdminUsersRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -144,6 +170,13 @@ declare module '@tanstack/react-router' {
       path: '/setup'
       fullPath: '/setup'
       preLoaderRoute: typeof SetupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/review': {
@@ -181,6 +214,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LibraryIndexRouteImport
       parentRoute: typeof LibraryRoute
     }
+    '/admin/users': {
+      id: '/admin/users'
+      path: '/admin/users'
+      fullPath: '/admin/users'
+      preLoaderRoute: typeof AdminUsersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/library/$slug/$ts': {
       id: '/library/$slug/$ts'
       path: '/$slug/$ts'
@@ -209,8 +249,10 @@ const rootRouteChildren: RootRouteChildren = {
   LibraryRoute: LibraryRouteWithChildren,
   LoginRoute: LoginRoute,
   ReviewRoute: ReviewRoute,
+  SettingsRoute: SettingsRoute,
   SetupRoute: SetupRoute,
   StudioRoute: StudioRoute,
+  AdminUsersRoute: AdminUsersRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

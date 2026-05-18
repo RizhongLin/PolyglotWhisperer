@@ -48,6 +48,52 @@ _END: Any = object()
 # Sentinel signalling that a slow subscriber should reconnect (we drop them
 # rather than hold up writers).
 _DISCONNECT: Any = object()
+# Poll interval (seconds) between heartbeat NDJSON lines when no pipeline
+# events have been emitted recently.
+_HEARTBEAT_INTERVAL = 15
+
+
+def _load_user_env_overrides(user_id: int | None) -> dict[str, str]:
+    """Load decrypted user credentials and return PGW_* env overrides."""
+    if user_id is None:
+        return {}
+    try:
+        from sqlalchemy import select
+
+        from pgw.crypto.encryption import decrypt
+        from pgw.db.models.credential import UserCredential
+        from pgw.db.session import SessionLocal
+    except ImportError:
+        return {}
+
+    overrides: dict[str, str] = {}
+    with SessionLocal() as db:
+        try:
+            rows = db.scalars(select(UserCredential).where(UserCredential.user_id == user_id)).all()
+        except Exception:
+            logger.debug("User credentials table not available (migration pending?)", exc_info=True)
+            return {}
+        for r in rows:
+            try:
+                key = decrypt(r.encrypted_value)
+            except Exception:
+                logger.warning("Failed to decrypt credential %d for user %d", r.id, user_id)
+                continue
+            if r.service == "llm":
+                overrides["PGW_LLM__API_KEY"] = key
+                if r.api_base:
+                    overrides["PGW_LLM__API_BASE"] = r.api_base
+                if r.api_model:
+                    overrides["PGW_LLM__API_MODEL"] = r.api_model
+            elif r.service == "whisper":
+                overrides["PGW_WHISPER__API_KEY"] = key
+                if r.api_base:
+                    overrides["PGW_WHISPER__API_BASE"] = r.api_base
+                if r.api_model:
+                    overrides["PGW_WHISPER__API_MODEL"] = r.api_model
+    return overrides
+
+
 # Heartbeat cadence on quiet streams (server → client).
 _HEARTBEAT_INTERVAL_SEC = 15.0
 # Per-subscriber queue depth — client too slow → drop the subscriber so it
@@ -265,6 +311,7 @@ class JobManager:
             },
         )
         spec = {k: v for k, v in state.record.inputs.items() if k != "user_id"}
+        spec["env_overrides"] = _load_user_env_overrides(user_id)
         ok = GLOBAL_WORKERS.send_threadsafe(
             user_id,
             {"type": "job.assign", "job_id": state.record.id, "spec": spec},
@@ -547,12 +594,23 @@ class JobManager:
             refine=req.get("refine", False),
         )
 
-        # P1: env_overrides is empty (single-tenant). P2 will populate it
-        # from the requesting user's encrypted credential rows.
+        # Build per-user env overrides from stored credentials
+        env_overrides = _load_user_env_overrides(req.get("user_id"))
+
+        # In production multi-user mode, require per-user credentials.
+        # When PGW_REQUIRE_USER_CREDENTIALS is set, fall back to env
+        # API keys is disabled — users must add credentials in Settings.
+        user_id = req.get("user_id")
+        if user_id and os.environ.get("PGW_REQUIRE_USER_CREDENTIALS") and not env_overrides:
+            raise ValueError(
+                "No API credentials configured for this user. "
+                "Add Whisper or LLM credentials in Settings."
+            )
+
         ctx = JobContext(
             user_id=req.get("user_id"),
             job_id=state.record.id,
-            env_overrides={},
+            env_overrides=env_overrides,
         )
 
         with use_context(ctx):
@@ -572,6 +630,19 @@ class JobManager:
                 chunk_size=req.get("chunk_size"),
                 cancel_token=state.cancel_token,
             )
+
+            # Sync workspace metadata + vocab to the DB so the library
+            # page and vocab endpoints serve from the database.
+            try:
+                from pgw.db.session import SessionLocal
+                from pgw.server.sync import sync_workspace_to_db
+
+                user_id = req.get("user_id")
+                if user_id is not None:
+                    with SessionLocal() as db:
+                        sync_workspace_to_db(db, workspace, int(user_id))
+            except Exception:
+                logger.warning("Failed to sync workspace %s to DB", workspace, exc_info=True)
 
             # The save stage already emits a workspace event via on_event
             # when the pipeline calls

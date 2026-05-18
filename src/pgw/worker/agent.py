@@ -216,7 +216,17 @@ async def _run_assigned_job(
                 translate=spec.get("translate"),
                 subs=spec.get("subs", False),
             )
-            config = load_config(**overrides)
+            # Apply per-user credential env overrides from the server
+            from pgw.core.context import JobContext, use_context
+
+            ctx = JobContext(
+                user_id=None,
+                job_id=job_id,
+                env_overrides=spec.get("env_overrides") or {},
+            )
+            with use_context(ctx):
+                config = load_config(context=ctx, **overrides)
+
             workspace = run_pipeline(
                 input_path=spec["input"],
                 config=config,

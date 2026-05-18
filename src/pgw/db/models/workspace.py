@@ -1,9 +1,8 @@
 """Workspace and job ORM models.
 
-Filesystem stays the source of truth for blobs (videos, VTTs, vocab
-JSON, audio). The ``workspaces`` row is an index over them with
-ownership. The ``fs_path`` column records the canonical on-disk path so
-the row can be regenerated from the FS if the DB is ever lost.
+The DB stores metadata, vocabulary, and summary stats.  Video/audio/VTT
+blobs and PDF/EPUB exports remain on the filesystem and are served from
+there via ``/ws/...`` passthrough.
 """
 
 from __future__ import annotations
@@ -22,7 +21,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from pgw.db.base import Base
-from pgw.db.types import BigIntPK
+from pgw.db.types import BigIntPK, JSONText
 
 if TYPE_CHECKING:
     from pgw.db.models.user import User
@@ -50,15 +49,13 @@ class Workspace(Base):
     source_language: Mapped[str | None] = mapped_column(Text, nullable=True)
     target_language: Mapped[str | None] = mapped_column(Text, nullable=True)
     duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
-    # Embed columns provisioned in P2 but populated in P4 (provider
-    # detection / oembed probe).
     embed_provider: Mapped[str | None] = mapped_column(Text, nullable=True)
     embed_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     embed_blocked_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     fs_path: Mapped[str] = mapped_column(Text, nullable=False)
-    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSONText, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow, index=True
     )
@@ -69,7 +66,7 @@ class Workspace(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
-    vocab_occurrences: Mapped[list["VocabOccurrence"]] = relationship(  # noqa: F821
+    vocab_occurrences: Mapped[list["VocabOccurrence"]] = relationship(
         back_populates="workspace", cascade="all, delete-orphan"
     )
 

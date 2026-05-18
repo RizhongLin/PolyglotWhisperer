@@ -24,3 +24,6 @@ services:
     environment:
       # Override to use the host-mounted SPA bundle
       - PGW_SPA_DIR=/app/src/pgw/templates/dist
+      # Required for credential encryption. Generate with:
+      #   python -c "import secrets; print(secrets.token_urlsafe(32))"
+      # - PGW_SECRET_KEY=

@@ -35,7 +35,8 @@ from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile, status
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from starlette.responses import FileResponse
 
-from pgw.auth.deps import current_user_or_bootstrap
+from pgw.auth.deps import current_user_optional, current_user_or_bootstrap
+from pgw.db.models.user import User
 from pgw.server.jobs import JobManager, JobRequest
 from pgw.server.templates import (
     _ICON_PNG,
@@ -325,13 +326,13 @@ def _read_vocab(workspace: Path) -> dict | None:
     return None
 
 
-def _form_defaults() -> dict:
-    """Pre-fill the Studio form with the user's pgw config."""
+def _form_defaults(user_preferences: dict | None = None) -> dict:
+    """Pre-fill the Studio form with config + optional per-user preferences."""
     try:
         from pgw.core.config import load_config
 
         cfg = load_config()
-        return {
+        result = {
             "language": cfg.whisper.language or "fr",
             "translate": cfg.llm.target_language or "",
             "backend": cfg.whisper.backend or "local",
@@ -340,12 +341,17 @@ def _form_defaults() -> dict:
             "llm_model": cfg.llm.model or "",
             "refine": cfg.llm.refine_enabled,
         }
+        if user_preferences:
+            for key in ("language", "translate", "backend", "llm_backend"):
+                if key in user_preferences and user_preferences[key]:
+                    result[key] = user_preferences[key]
+        return result
     except Exception:  # noqa: BLE001 - best-effort
         return {
             "language": "fr",
             "translate": "",
-            "backend": "api",
-            "llm_backend": "api",
+            "backend": "local",
+            "llm_backend": "local",
             "whisper_model": "",
             "llm_model": "",
             "refine": False,
@@ -501,12 +507,16 @@ def create_library_app(base_dir: Path, jobs: JobManager) -> FastAPI:
 
     # Mount auth + setup endpoints first so they're discoverable
     # even before the rest of the app initialises.
+    from pgw.server.routes.admin import router as admin_router
     from pgw.server.routes.auth import router as auth_router
+    from pgw.server.routes.credentials import router as credentials_router
     from pgw.server.routes.flashcards import router as flashcards_router
     from pgw.server.routes.workers import router as workers_router
     from pgw.server.routes.workers import ws_router as worker_ws_router
 
     app.include_router(auth_router)
+    app.include_router(credentials_router)
+    app.include_router(admin_router)
     app.include_router(workers_router)
     app.include_router(worker_ws_router)
     app.include_router(flashcards_router)
@@ -611,8 +621,10 @@ def create_library_app(base_dir: Path, jobs: JobManager) -> FastAPI:
         _mark_workspace_embed_blocked(workspace)
 
     @app.get("/api/config/defaults")
-    def api_form_defaults() -> dict:
-        return _form_defaults()
+    def api_form_defaults(
+        user: User | None = Depends(current_user_optional),
+    ) -> dict:
+        return _form_defaults(user.preferences if user else None)
 
     @app.get("/api/languages")
     def api_languages() -> list[dict]:
@@ -919,8 +931,10 @@ def create_workspace_app(workspace: Path) -> FastAPI:
         return vocab
 
     @app.get("/api/config/defaults")
-    def api_form_defaults() -> dict:
-        return _form_defaults()
+    def api_form_defaults(
+        user: User | None = Depends(current_user_optional),
+    ) -> dict:
+        return _form_defaults(user.preferences if user else None)
 
     @app.get("/api/languages")
     def api_languages() -> list[dict]:

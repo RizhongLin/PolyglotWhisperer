@@ -5,6 +5,7 @@ import { Brain, CheckCircle2, Inbox, Loader2 } from 'lucide-react';
 import { ApiError, api } from '@/api/client';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { ReviewCard } from '@/components/review/ReviewCard';
 import type { FsrsRating } from '@/api/types';
 
@@ -23,6 +24,7 @@ function ReviewPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reviewed, setReviewed] = useState(0);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
 
   // Reset position when the queue refetches with a different first id.
   useEffect(() => {
@@ -77,13 +79,18 @@ function ReviewPage() {
     }
   };
 
-  const onDiscard = async () => {
+  const onDiscard = () => {
     if (!card) return;
-    if (!confirm('Discard this card permanently?')) return;
+    setConfirmDiscard(true);
+  };
+
+  const doDiscard = async () => {
+    if (!card) return;
     setBusy(true);
     setError(null);
     try {
       await api.deleteFlashcard(card.id);
+      setConfirmDiscard(false);
       await advance();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : (err as Error).message);
@@ -166,6 +173,16 @@ function ReviewPage() {
           busy={busy}
         />
       )}
+      <ConfirmDialog
+        open={confirmDiscard}
+        title="Discard flashcard"
+        message="Discard this card permanently? This cannot be undone."
+        confirmLabel="Discard"
+        destructive
+        busy={busy}
+        onConfirm={doDiscard}
+        onCancel={() => setConfirmDiscard(false)}
+      />
     </div>
   );
 }
