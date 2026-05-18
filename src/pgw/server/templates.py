@@ -214,7 +214,7 @@ def _discover_workspaces(base_dir: Path, backfill_metadata: bool = True) -> list
                     "target_language": meta.get("target_language", ""),
                     "duration": meta.get("source_duration"),
                     "created_at": meta.get("created_at", ""),
-                    "has_video": find_video(ts_dir) is not None,
+                    "has_video": find_video(ts_dir) is not None or bool(meta.get("video_url")),
                     "upload_date": meta.get("upload_date", ""),
                     "uploader": meta.get("uploader", ""),
                     "thumbnail": meta.get("thumbnail", ""),
@@ -406,8 +406,32 @@ def _redownload_video_streaming(workspace: Path, send_event: typing.Callable[[st
         )
         _update_workspace_meta(workspace, source)
 
+        # After successful re-download, remove any stale stream URL so
+        # the SPA prefers the newly downloaded local file.
+        _remove_meta_keys(workspace, "video_url", "audio_url")
+
         send_event(json.dumps({"progress": 100, "status": "done", "detail": "Complete"}))
         return True
     except Exception as e:  # noqa: BLE001
         send_event(json.dumps({"progress": 0, "status": "error", "detail": str(e)}))
         return False
+
+
+def _remove_meta_keys(workspace: Path, *keys: str) -> None:
+    """Remove keys from workspace metadata.json (idempotent)."""
+    import json
+
+    meta_path = workspace / "metadata.json"
+    if not meta_path.is_file():
+        return
+    try:
+        data = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return
+    changed = False
+    for key in keys:
+        if key in data:
+            del data[key]
+            changed = True
+    if changed:
+        meta_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")

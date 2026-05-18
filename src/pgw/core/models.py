@@ -42,3 +42,5 @@ class VideoSource:
     uploader: str | None = None  # Channel or uploader name
     thumbnail: str | None = None  # Thumbnail URL
     description: str | None = None  # Video description
+    video_url: str | None = None  # Direct stream URL for browser playback
+    audio_url: str | None = None  # Direct audio stream URL for ffmpeg extraction

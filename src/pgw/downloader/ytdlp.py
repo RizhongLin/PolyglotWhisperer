@@ -301,3 +301,88 @@ def download(
         thumbnail=thumbnail,
         description=description,
     )
+
+
+def resolve_stream(
+    url: str,
+    output_dir: Path | None = None,
+    language: str | None = None,  # accepted for API compat; stream mode doesn't download subtitles
+) -> VideoSource | None:
+    """Resolve direct stream URLs from a video URL without downloading.
+
+    Calls ``yt_dlp.extract_info(url, download=False)`` **once** to obtain
+    the best progressive video URL (browser-playable mp4 via HTTPS) and
+    the best audio URL (for ffmpeg extraction) from the format list.
+
+    Returns a ``VideoSource`` with ``video_url`` and ``audio_url`` set;
+    ``video_path`` is a dummy entry.
+
+    Returns ``None`` when the extractor has no usable stream URLs,
+    so the caller falls back to ``download()``.
+    """
+    try:
+        import yt_dlp
+    except ImportError:
+        return None
+
+    if output_dir is None:
+        output_dir = Path("./pgw_workspace/.cache/downloads")
+    output_dir = Path(output_dir)
+
+    try:
+        # Single extract_info call — pulls all formats at once
+        opts = {
+            "quiet": True,
+            "no_warnings": True,
+        }
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except Exception:
+        return None
+
+    formats = info.get("formats") or []
+
+    # Pick best browser-playable video URL (progressive mp4 via HTTPS)
+    video_url: str | None = None
+    for f in formats:
+        if (
+            f.get("ext") == "mp4"
+            and f.get("protocol") == "https"
+            and f.get("vcodec") not in (None, "none")
+            and f.get("url")
+        ):
+            video_url = f["url"]
+            break
+    if not video_url:
+        # Some extractors put the best URL on info directly
+        video_url = info.get("url") if info.get("protocol") == "https" else None
+
+    # Pick best audio URL for ffmpeg (any protocol, ffmpeg reads m3u8 too)
+    audio_url: str | None = None
+    for f in formats:
+        if (
+            f.get("acodec") not in (None, "none")
+            and f.get("vcodec") in (None, "none")
+            and f.get("url")
+        ):
+            audio_url = f["url"]
+            break
+    if not audio_url:
+        # Fall back: use video URL for audio extraction (ffmpeg strips video)
+        audio_url = video_url
+
+    title = (info.get("title") or "video").strip()
+    dummy_path = output_dir / f"{title}_{info.get('id', 'stream')}.mp4"
+
+    return VideoSource(
+        video_path=dummy_path,
+        source_url=url,
+        title=title,
+        duration=info.get("duration"),
+        video_url=video_url,
+        audio_url=audio_url,
+        upload_date=info.get("upload_date"),
+        uploader=info.get("channel") or info.get("uploader"),
+        thumbnail=info.get("thumbnail"),
+        description=info.get("description"),
+    )

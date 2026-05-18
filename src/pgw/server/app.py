@@ -105,7 +105,7 @@ _CSP = (
     "style-src 'self' 'unsafe-inline'; "
     "script-src 'self' 'unsafe-inline'; "
     "img-src 'self' data: https:; "
-    "media-src 'self'; "
+    "media-src 'self' https: blob:; "
     "connect-src 'self'; "
     "font-src 'self' data:"
 )
@@ -204,17 +204,36 @@ def _workspace_detail(workspace: Path, base_dir: Path) -> dict:
             }
         )
     video = find_video(workspace)
-    # Embed block: provider-native iframe target for YouTube / Vimeo.
-    # Suppressed when the user has marked the embed as blocked
-    # (X-Frame-Options refusal) so the SPA falls back to HTML5.
+    # Stream URL: resolved by the pipeline via yt-dlp extract_info(download=False).
+    # The browser can play this directly from the CDN — no local video file needed.
+    video_url: str | None = meta.get("video_url") or None
+
+    # If the stream URL has expired (e.g. YouTube signed URLs), re-resolve it
+    # on page load. Only do this when there is no local video file — if a
+    # local file exists the SPA will prefer it anyway via the videoSrc logic.
+    if not video_url and meta.get("source_url") and not video:
+        try:
+            from pgw.downloader.ytdlp import resolve_stream
+
+            refreshed = resolve_stream(meta["source_url"])
+            if refreshed is not None and refreshed.video_url:
+                video_url = refreshed.video_url
+        except Exception:
+            pass  # best-effort — keep whatever we had
+
+    # Embed block: legacy provider-native iframe for YouTube / Vimeo.
+    # Only provided when stream URL is unavailable. Suppressed when the user
+    # has marked the embed as blocked (X-Frame-Options refusal).
     embed_block: dict | None = None
-    target = detect_embed(meta.get("source_url"))
-    if target is not None and not meta.get("embed_blocked"):
-        embed_block = {
-            "provider": target.provider,
-            "url": target.embed_url,
-            "video_id": target.video_id,
-        }
+    if not video_url:
+        target = detect_embed(meta.get("source_url"))
+        if target is not None and not meta.get("embed_blocked"):
+            embed_block = {
+                "provider": target.provider,
+                "url": target.embed_url,
+                "video_id": target.video_id,
+            }
+
     return {
         "slug": workspace.parent.name,
         "timestamp": workspace.name,
@@ -222,6 +241,7 @@ def _workspace_detail(workspace: Path, base_dir: Path) -> dict:
         "tracks": tracks,
         "files": files_index,
         "video": video.name if video is not None else None,
+        "video_url": video_url,
         "embed": embed_block,
         "siblings": [{"slug": sp.parent.name, "timestamp": sp.name} for sp in siblings],
     }

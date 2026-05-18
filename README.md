@@ -167,7 +167,7 @@ Pages:
 
 - **Library** (`/library`) — workspace grid with thumbnails, language pair, difficulty, dates. Click any card to open the player.
 - **Studio** (`/studio`) — paste a URL or drop a file, pick source + target language from dropdowns, choose where to run (auto / worker / server), hit _Start_. Live progress cards stream events from the backend; cancel any time, close the tab and come back without losing state. Advanced flags (backends, models, chunk size, ffmpeg start/duration, refine, subs) are tucked behind a disclosure.
-- **Player** (`/library/<slug>/<ts>`) — HTML5 / YouTube / Vimeo video via the `PlayerAdapter` switch (auto-falls-back to HTML5 when an embed refuses), click-to-seek transcript with anticipate/linger windows, track switcher (bilingual / original / translation), vocab card with click-to-save flashcards, downloads card.
+- **Player** (`/library/<slug>/<ts>`) — video streams directly from the origin CDN via URLs resolved by yt-dlp (no video download — audio-only for transcription). Falls back to YouTube/Vimeo embeds (legacy), then local HTML5 `<video>`. Click-to-seek transcript with anticipate/linger windows, track switcher (bilingual / original / translation), vocab card with click-to-save flashcards, downloads card.
 - **Review** (`/review`) — FSRS spaced-repetition queue: due cards stream one-at-a-time, reveal answer, grade Again/Hard/Good/Easy, optional 🗑 Discard. Audio clip auto-plays per card when the workspace has a saved range.
 
 Backend is **FastAPI + uvicorn** serving JSON over `/api/...` and raw workspace files over `/ws/<slug>/<ts>/<file>`. Job state is persisted as append-only JSONL under `<workspace>/.jobs/`, so an in-flight job survives a browser refresh and the server's restart marks orphaned jobs as `interrupted` rather than leaving them stuck.
@@ -240,15 +240,40 @@ docker run --rm -it -v "$PWD:/data" pgw run /data/video.mp4 -l fr \
 
 The mounted `/data` is also where `pgw_workspace/` and `pgw_workspace/.jobs/<id>.jsonl` live — keep the volume mount stable across restarts so in-flight jobs reattach cleanly.
 
-**Dev mode** — mount `src/` to iterate on Python without rebuilding:
+### Docker dev mode — iterate without rebuilding the image
+
+Two options, depending on whether you need frontend HMR.
+
+**Option A: Fastest frontend loop (Vite HMR)**
 
 ```bash
-docker run --rm -it -p 8321:8321 \
-  -v "$PWD:/data" -v "$PWD/src:/app/src" \
-  pgw serve --no-open
+# Terminal 1: Docker runs the backend
+docker compose up -d
+
+# Terminal 2: Vite dev server on host — instant HMR for frontend
+cd frontend && npm run dev
+# Open http://127.0.0.1:5173  (Vite proxies /api → localhost:8321)
 ```
 
-`docker build` always rebuilds the React SPA from the TypeScript source via the `js-builder` stage, so you don't need Node locally to ship a Docker image. The host-side `npm run build` step is only needed when running `pgw serve` directly against your working tree (no Docker), since `pgw serve` reads `src/pgw/templates/dist/` from disk.
+Frontend changes appear instantly. For Python changes: `docker compose restart pgw` (5 s, no rebuild).
+
+**Option B: Full Docker dev (no Node required on host after initial build)**
+
+```bash
+# One-time: build frontend on host
+cd frontend && npm run build
+
+# Start with the dev overlay
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+```
+
+The dev overlay (`docker-compose.dev.yml`) mounts `src/` and `dist/` from the host into the container via `PGW_SPA_DIR`. After that:
+
+- **Python**: edit `src/pgw/*.py` → `docker compose restart pgw`
+- **Frontend**: edit `frontend/*.tsx` → `cd frontend && npm run build` → refresh browser
+- **No `docker compose build` needed** for either.
+
+To go back to production mode: `docker compose -f docker-compose.yml up -d`.
 
 ## Architecture
 

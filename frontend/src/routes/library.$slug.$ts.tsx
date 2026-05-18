@@ -96,7 +96,9 @@ interface LayoutProps {
 
 function PlayerLayout({ detail, vocab, slug, ts }: LayoutProps) {
   const wsBase = `/ws/${encodeURIComponent(slug)}/${encodeURIComponent(ts)}`;
-  const videoSrc = detail.video ? `${wsBase}/${encodeURIComponent(detail.video)}` : null;
+  // Prefer direct CDN stream URL (resolved by yt-dlp, no local file)
+  // over local video file path.
+  const videoSrc = detail.video_url ?? (detail.video ? `${wsBase}/${encodeURIComponent(detail.video)}` : null);
   const meta = detail.metadata;
 
   const pk = `pgw:track:${slug}/${ts}`;

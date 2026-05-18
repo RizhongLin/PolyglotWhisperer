@@ -28,21 +28,32 @@ def resolve(
 ) -> VideoSource:
     """Resolve input to a VideoSource.
 
-    If input is a local file, return it directly.
-    If input is a URL, download via yt-dlp (with optional subtitle download).
+    If input is a URL, first attempts stream resolution (no download)
+    via yt-dlp ``extract_info(download=False)``.  On success the
+    returned ``VideoSource`` carries ``video_url`` / ``audio_url`` and
+    the pipeline will skip video download entirely.  Falls back to a
+    full download when stream resolution is unavailable.
+
+    If input is a local file, returns it directly.
 
     Args:
         input_path: URL or local file path.
-        output_dir: Directory for downloaded files.
+        output_dir: Directory for downloaded/cached files.
         fmt: yt-dlp format string override.
         language: Source language code for subtitle download.
 
     Returns:
-        VideoSource with local video path.
+        VideoSource with local video path and (when resolved) stream URLs.
     """
     if is_url(input_path):
-        from pgw.downloader.ytdlp import download
+        from pgw.downloader.ytdlp import download, resolve_stream
 
+        # Try stream resolution first — no download
+        streamed = resolve_stream(input_path, output_dir=output_dir, language=language)
+        if streamed is not None and streamed.video_url:
+            return streamed
+
+        # Fall back to full download
         kwargs: dict = {"output_dir": output_dir}
         if fmt:
             kwargs["fmt"] = fmt

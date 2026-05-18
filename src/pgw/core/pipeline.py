@@ -86,9 +86,13 @@ def run_pipeline(
     workspace = create_workspace(title, base_dir=config.workspace_dir)
     paths = workspace_paths(workspace, language, target_lang=translate, video_ext=video_ext)
 
-    # Link video into workspace (symlink to save disk, copy as fallback)
+    # Link video into workspace (symlink to save disk, copy as fallback).
+    # Skip when stream URL is available — browser plays directly from CDN.
     video_dest = paths["video"]
-    if not video_dest.is_file():
+    if source.video_url:
+        emit("download", 0.5, "Stream URL resolved — no video download")
+        stage("Stream URL resolved", source.video_url[:60] + "…")
+    elif not video_dest.is_file():
         if video_dest.is_symlink():
             video_dest.unlink()  # Remove broken symlink
         link_or_copy(source.video_path, video_dest)
@@ -106,13 +110,17 @@ def run_pipeline(
                 parts.append(f"duration {duration}")
             clip_detail = ", ".join(parts)
         stage("Extracting audio", clip_detail)
+        # Prefer audio stream URL for ffmpeg; fall back to video path for
+        # local files / downloaded videos.
+        audio_input: Path | str = source.audio_url or source.video_path
         _, was_cached = extract_audio_cached(
-            source.video_path,
+            audio_input,
             output_path=audio_path,
             workspace_dir=config.workspace_dir,
             start=start,
             duration=duration,
             content_hash=source.content_hash,
+            source_url=source.source_url,
         )
         if was_cached:
             cache_hit()
@@ -147,11 +155,23 @@ def run_pipeline(
     use_api = config.whisper.backend == "api"
 
     # Shared transcription cache: .cache/transcriptions/<hash>.json
-    # Derive audio identity from video content hash + extraction params
+    # Derive audio identity from video content hash + extraction params.
+    # For stream-resolved sources (no content_hash), use the source URL
+    # so the same episode transcribed in multiple workspaces shares the cache.
     audio_identity = None
     if source.content_hash:
         audio_identity = cache_key(
             content_hash=source.content_hash,
+            sample_rate=16000,
+            start=start,
+            duration=duration,
+        )
+    elif source.source_url:
+        import hashlib
+
+        url_hash = hashlib.sha256(source.source_url.encode()).hexdigest()[:16]
+        audio_identity = cache_key(
+            content_hash=url_hash,
             sample_rate=16000,
             start=start,
             duration=duration,
@@ -477,10 +497,13 @@ def run_pipeline(
         uploader=source.uploader,
         thumbnail=source.thumbnail,
         description=source.description,
+        video_url=source.video_url,
     )
 
     # Step 7: Optional playback
-    if play:
+    if play and source.video_url:
+        warning("Playback skipped — use the web UI to play stream URLs.")
+    elif play:
         from pgw.player.mpv_player import check_mpv
         from pgw.player.mpv_player import play as mpv_play
 

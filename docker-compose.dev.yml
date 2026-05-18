@@ -1,26 +1,26 @@
-# Development-only services. Start with:
-#   docker compose -f docker-compose.dev.yml up -d
+# Dev-mode override — mount source code so changes are picked up instantly
+# without rebuilding the Docker image.
 #
-# Postgres listens on 5432. Connect with:
-#   PGW_DATABASE_URL=postgresql+psycopg://pgw:pgw@localhost:5432/pgw_dev
-services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: pgw_pg_dev
-    restart: unless-stopped
-    ports:
-      - "5432:5432"
-    environment:
-      POSTGRES_USER: pgw
-      POSTGRES_PASSWORD: pgw
-      POSTGRES_DB: pgw_dev
-    volumes:
-      - pgw_pg_dev_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U pgw -d pgw_dev"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
+# Usage:
+#   cd frontend && npm run build          # rebuild frontend (one-time, or use npm run dev)
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#
+# Python:  change src/pgw/*.py  → restart with `docker compose restart pgw`
+# Frontend: change frontend/*.tsx → `npm run build` → refresh browser
+#           (or run `npm run dev` locally for HMR at http://127.0.0.1:5173)
 
-volumes:
-  pgw_pg_dev_data:
+services:
+  pgw:
+    volumes:
+      # Mount host source code over the built-in copy.  Python auto-reload
+      # (uvicorn --reload) is not enabled, so restart the container to see
+      # Python changes:  docker compose restart pgw
+      - ./src:/app/src
+      # Mount host-built frontend dist.  After `npm run build` on the host,
+      # the new bundle is live immediately — no container restart needed.
+      - ./src/pgw/templates/dist:/app/src/pgw/templates/dist
+      # Mount data directory (same as production compose)
+      - .:/data
+    environment:
+      # Override to use the host-mounted SPA bundle
+      - PGW_SPA_DIR=/app/src/pgw/templates/dist

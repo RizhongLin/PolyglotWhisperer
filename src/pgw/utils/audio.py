@@ -1,12 +1,19 @@
-"""Audio extraction from video files using ffmpeg."""
+"""Audio extraction from video files and stream URLs using ffmpeg."""
 
 from __future__ import annotations
 
+import hashlib
 import shutil
 import subprocess
 from pathlib import Path
 
 from pgw.utils.cache import cache_key, find_cached_file, get_cache_dir, link_or_copy
+
+
+def _is_url(source: str | Path) -> bool:
+    """True when *source* is a network URL ffmpeg should read directly."""
+    s = str(source)
+    return s.startswith(("http://", "https://", "rtmp://", "rtmps://"))
 
 
 def check_ffmpeg() -> bool:
@@ -15,55 +22,59 @@ def check_ffmpeg() -> bool:
 
 
 def extract_audio(
-    video_path: Path,
+    video_path: Path | str,
     output_path: Path | None = None,
     sample_rate: int = 16000,
     start: str | None = None,
     duration: str | None = None,
 ) -> Path:
-    """Extract audio from a video file to WAV format.
+    """Extract audio to 16 kHz mono PCM WAV.
+
+    Accepts a local file path or a network URL (https / rtmp).
+    When the input is a URL, ffmpeg reads the stream directly — no
+    file needs to exist on disk.
 
     Args:
-        video_path: Path to the input video file.
-        output_path: Path for the output WAV file. Defaults to
-            same directory and stem as video with .wav extension.
+        video_path: Local file path or network URL.
+        output_path: Path for the output WAV file.
         sample_rate: Audio sample rate in Hz. Whisper expects 16000.
-        start: Start time for clipping (ffmpeg format: "HH:MM:SS" or seconds).
-        duration: Duration to extract (ffmpeg format: "HH:MM:SS" or seconds).
+        start: Start time for clipping (ffmpeg format).
+        duration: Duration to extract (ffmpeg format).
 
     Returns:
         Path to the extracted audio file.
 
     Raises:
-        FileNotFoundError: If ffmpeg is not installed or video doesn't exist.
+        FileNotFoundError: If ffmpeg is not installed, or if a local
+            file path does not exist.
         subprocess.CalledProcessError: If ffmpeg fails.
     """
     if not check_ffmpeg():
         raise FileNotFoundError("ffmpeg not found. Install it with: brew install ffmpeg")
 
-    video_path = Path(video_path)
-    if not video_path.is_file():
-        raise FileNotFoundError(f"Video file not found: {video_path}")
+    source_str = str(video_path)
+    is_remote = _is_url(source_str)
+
+    if not is_remote:
+        local = Path(video_path)
+        if not local.is_file():
+            raise FileNotFoundError(f"Video file not found: {local}")
 
     if output_path is None:
-        output_path = video_path.with_suffix(".wav")
+        if is_remote:
+            output_path = Path("audio.wav")
+        else:
+            output_path = Path(video_path).with_suffix(".wav")
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    cmd = [
-        "ffmpeg",
-    ]
+    cmd = ["ffmpeg"]
 
     if start is not None:
         cmd.extend(["-ss", str(start)])
 
-    cmd.extend(
-        [
-            "-i",
-            str(video_path),
-        ]
-    )
+    cmd.extend(["-i", source_str])
 
     if duration is not None:
         cmd.extend(["-t", str(duration)])
@@ -91,31 +102,43 @@ def extract_audio(
     return output_path
 
 
+def _hash_url(url: str) -> str:
+    """Short URL hash for cache keys."""
+    return hashlib.sha256(url.encode()).hexdigest()[:16]
+
+
 def extract_audio_cached(
-    video_path: Path,
+    video_path: Path | str,
     output_path: Path,
     workspace_dir: Path,
     sample_rate: int = 16000,
     start: str | None = None,
     duration: str | None = None,
     content_hash: str | None = None,
+    source_url: str | None = None,
 ) -> tuple[Path, bool]:
     """Extract audio with caching. Returns (path, cache_hit).
 
-    Cache lives at <workspace_dir>/.cache/audio/. On hit, symlinks the
-    cached file into the workspace. On miss, extracts to cache then symlinks.
+    Cache lives at ``<workspace_dir>/.cache/audio/``. On hit, symlinks
+    the cached file into the workspace. On miss, extracts to cache then
+    symlinks.
 
-    Uses content-based keys when *content_hash* is available, falling back
-    to metadata-based keys for backward compatibility.
+    For local files: uses *content_hash* (SHA-256 of video content) for
+    content-addressable caching, falling back to metadata-based keys.
+
+    For stream URLs: uses ``source_url`` hash as the cache key so the
+    same episode always hits the cache regardless of which workspace
+    requested it.
 
     Args:
-        video_path: Path to the input video file.
+        video_path: Local file path or network URL.
         output_path: Desired output path in workspace.
         workspace_dir: Base workspace directory for the cache.
         sample_rate: Audio sample rate in Hz.
         start: Start time for clipping (ffmpeg format).
         duration: Duration to extract (ffmpeg format).
-        content_hash: SHA-256 of video content for content-addressable caching.
+        content_hash: SHA-256 of video content (local files).
+        source_url: Source URL for stream-based caching.
 
     Returns:
         Tuple of (audio_path, cache_hit).
@@ -123,24 +146,42 @@ def extract_audio_cached(
     cache_dir = get_cache_dir(workspace_dir, "audio")
     params = dict(sample_rate=sample_rate, start=start, duration=duration)
 
-    # Dual-lookup: content-based key first, then metadata fallback
-    cached_path = find_cached_file(
-        cache_dir,
-        ".wav",
-        content_hash=content_hash,
-        file_path=video_path,
-        **params,
-    )
-    if cached_path is not None:
-        link_or_copy(cached_path, output_path)
-        return output_path, True
+    is_remote = _is_url(video_path)
 
-    # Cache miss — determine key for the new entry
-    if content_hash:
-        key = cache_key(content_hash=content_hash, **params)
+    # Build cache identity
+    if is_remote and source_url:
+        cache_identity = _hash_url(source_url)
+        resolved_file_path = None
+    elif content_hash:
+        cache_identity = content_hash
+        resolved_file_path = video_path if not is_remote else None
     else:
-        key = cache_key(video_path, **params)
-    new_cached_path = cache_dir / f"{key}.wav"
+        cache_identity = None
+        resolved_file_path = video_path if not is_remote else None
+
+    # Lookup
+    if cache_identity:
+        cached_path = find_cached_file(
+            cache_dir,
+            ".wav",
+            content_hash=cache_identity,
+            **params,
+        )
+        if cached_path is not None:
+            link_or_copy(cached_path, output_path)
+            return output_path, True
+
+    # Determine write key
+    if cache_identity:
+        key = cache_key(content_hash=cache_identity, **params)
+    elif resolved_file_path:
+        key = cache_key(resolved_file_path, **params)
+    else:
+        key = None
+
+    new_cached_path = (
+        cache_dir / f"{key}.wav" if key else cache_dir / f"{_hash_url(str(video_path))}.wav"
+    )
 
     extract_audio(
         video_path,

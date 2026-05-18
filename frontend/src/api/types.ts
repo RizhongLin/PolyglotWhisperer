@@ -76,6 +76,9 @@ export interface WorkspaceDetail {
   tracks: SubtitleTrack[];
   files: WorkspaceFile[];
   video: string | null;
+  /** Direct CDN stream URL resolved by yt-dlp. Browser can play this
+   * natively via <video> — no local file or embed needed. */
+  video_url: string | null;
   embed: EmbedTarget | null;
   siblings: Array<{ slug: string; timestamp: string }>;
 }
