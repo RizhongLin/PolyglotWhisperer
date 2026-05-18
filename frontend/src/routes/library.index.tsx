@@ -39,14 +39,26 @@ function LibraryPage() {
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Library</h1>
-          <p className="text-sm text-muted-foreground">
-            {items.length} workspace{items.length === 1 ? '' : 's'}
-          </p>
+    <div className="flex flex-col gap-8">
+      <section className="flex flex-col gap-3">
+        <div className="flex items-center gap-3">
+          <div className="flex size-10 items-center justify-center rounded-xl bg-primary/10">
+            <FileVideo className="size-5 text-primary" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Library</h1>
+            <p className="text-sm text-muted-foreground">
+              {items.length} workspace{items.length === 1 ? '' : 's'}
+            </p>
+          </div>
         </div>
+        <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
+          Browse your processed videos. Click any workspace to play, study
+          vocabulary, or download files.
+        </p>
+      </section>
+
+      <div className="flex justify-end">
         <Link to="/studio" className={buttonClass()}>
           <Sparkles className="size-4" />
           <span>New job</span>
@@ -80,7 +92,8 @@ function WorkspaceCard({ ws }: { ws: WorkspaceSummary }) {
       params={{ slug: ws.slug, ts: ws.timestamp }}
       className="group"
     >
-      <Card className="overflow-hidden p-0 transition-all hover:-translate-y-0.5 hover:shadow-md hover:border-primary/40">
+      <Card className="group/card overflow-hidden p-0 transition-all hover:-translate-y-0.5 hover:shadow-md hover:border-primary/40">
+        <div className="h-[3px] bg-linear-to-r from-primary/50 via-primary/20 to-transparent" />
         <div className="relative aspect-video w-full overflow-hidden bg-muted">
           {ws.thumbnail ? (
             <img
@@ -132,12 +145,14 @@ function WorkspaceCard({ ws }: { ws: WorkspaceSummary }) {
 
 function EmptyState() {
   return (
-    <Card className="flex flex-col items-center gap-4 p-12 text-center">
-      <Clock className="size-10 text-muted-foreground" />
+    <Card className="flex flex-col items-center gap-5 p-12 text-center">
+      <div className="flex size-12 items-center justify-center rounded-xl bg-muted">
+        <Clock className="size-6 text-muted-foreground" />
+      </div>
       <div>
         <h2 className="text-lg font-semibold">No workspaces yet</h2>
-        <p className="text-sm text-muted-foreground">
-          Process a video from the Studio page or via <code>pgw run</code>.
+        <p className="mt-1 text-sm text-muted-foreground">
+          Process a video from the Studio page or via <code className="rounded bg-muted px-1.5 py-0.5 text-[13px]">pgw run</code>.
         </p>
       </div>
       <Link to="/studio" className={buttonClass()}>

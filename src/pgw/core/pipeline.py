@@ -311,25 +311,28 @@ def run_pipeline(
     # Step 5: Optional translation
     if translate:
         trans_vtt = paths["translation_vtt"]
-        if not trans_vtt.is_file() and trans_result is None:
-            from pgw.llm.translator import translate_subtitles
+        if not trans_vtt.is_file():
+            if trans_result is None:
+                from pgw.llm.translator import translate_subtitles
+
+                emit("translate", 0.0, f"Translating to {translate}...")
+                stage(f"Translating to {translate}", config.llm.model)
+
+                def _on_translate_progress(frac: float) -> None:
+                    emit("translate", frac, f"Translating ({frac:.0%})...")
+
+                trans_result = translate_subtitles(
+                    segments,
+                    language,
+                    translate,
+                    config.llm,
+                    chunk_size=chunk_size,
+                    on_progress=_on_translate_progress,
+                )
+                llm_was_used = True
+
+            # Save translations (shared path for standalone and combined)
             from pgw.subtitles.converter import save_bilingual_vtt, save_subtitles
-
-            emit("translate", 0.0, f"Translating to {translate}...")
-            stage(f"Translating to {translate}", config.llm.model)
-
-            def _on_translate_progress(frac: float) -> None:
-                emit("translate", frac, f"Translating ({frac:.0%})...")
-
-            trans_result = translate_subtitles(
-                segments,
-                language,
-                translate,
-                config.llm,
-                chunk_size=chunk_size,
-                on_progress=_on_translate_progress,
-            )
-            llm_was_used = True
 
             save_subtitles(trans_result.translated, trans_vtt, fmt="vtt")
             saved.append(trans_vtt)

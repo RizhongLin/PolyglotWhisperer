@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from 'react';
 import { Link } from '@tanstack/react-router';
-import { Activity, CheckCircle2, X } from 'lucide-react';
+import { CheckCircle2, ListTodo, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonClass } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -46,11 +46,16 @@ interface JobsStripProps {
 export function JobsStrip({ jobs, onPatch, onTerminal, onDismiss }: JobsStripProps) {
   if (jobs.length === 0) return null;
   return (
-    <section className="flex flex-col gap-3">
-      <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-        <Activity className="mr-1 inline size-3.5" />
-        Jobs
-      </h2>
+    <section className="flex flex-col gap-4">
+      <div className="flex items-center gap-3">
+        <div className="flex size-8 items-center justify-center rounded-lg bg-muted">
+          <ListTodo className="size-4 text-muted-foreground" />
+        </div>
+        <h2 className="text-sm font-semibold">Jobs</h2>
+        <Badge variant="secondary" className="ml-1 tabular-nums">
+          {jobs.length}
+        </Badge>
+      </div>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         {jobs.map((job) => (
           <JobCard

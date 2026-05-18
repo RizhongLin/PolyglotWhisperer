@@ -2,15 +2,20 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createFileRoute } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import {
-  ChevronRight,
+  Check,
+  ChevronDown,
+  FileVideo,
+  Globe,
+  Link as LinkIcon,
   Loader2,
   Play,
+  Settings2,
   Sparkles,
   TriangleAlert,
   Upload,
 } from 'lucide-react';
-import { Button, buttonClass } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -29,7 +34,6 @@ function StudioPage() {
   const defaults = useQuery({ queryKey: ['form-defaults'], queryFn: () => api.formDefaults() });
   const [activeJobs, setActiveJobs] = useState<JobRecord[]>([]);
 
-  // Bootstrap: re-attach to in-flight jobs after a refresh.
   useEffect(() => {
     void api.jobs().then(({ jobs }) => {
       const active = jobs.filter((j) => !TERMINAL_STATES.has(j.state));
@@ -45,9 +49,6 @@ function StudioPage() {
     setActiveJobs((cur) => cur.map((j) => (j.id === id ? { ...j, ...patch } : j)));
   };
 
-  // Keep terminal cards visible until the user dismisses them — they
-  // hold the "Open workspace" link which is the whole reason the strip
-  // sticks around after a job lands.
   const handleTerminal = (_id: string) => {};
 
   const dismiss = (id: string) => {
@@ -55,14 +56,25 @@ function StudioPage() {
   };
 
   return (
-    <div className="flex flex-col gap-8">
-      <header>
-        <h1 className="text-2xl font-semibold tracking-tight">Studio</h1>
-        <p className="text-sm text-muted-foreground">
-          Submit a new pipeline run — paste a URL or upload a file. Watch live progress; close the
-          tab and come back any time.
+    <div className="flex flex-col gap-10">
+      {/* ── Hero ─────────────────────────────────────────────────── */}
+      <section className="flex flex-col gap-3">
+        <div className="flex items-center gap-3">
+          <div className="flex size-10 items-center justify-center rounded-xl bg-primary/10">
+            <Sparkles className="size-5 text-primary" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Studio</h1>
+            <p className="text-sm text-muted-foreground">
+              Submit a new pipeline run — paste a URL or upload a file
+            </p>
+          </div>
+        </div>
+        <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
+          Watch live progress; close the tab and come back any time. Completed
+          workspaces appear in your Library.
         </p>
-      </header>
+      </section>
 
       <NewJobForm defaults={defaults.data} onSubmitted={handleSubmit} />
 
@@ -89,6 +101,7 @@ function NewJobForm({ defaults, onSubmitted }: NewJobFormProps) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [advanced, setAdvanced] = useState(false);
+  const [fileName, setFileName] = useState<string | null>(null);
 
   const { data: languages } = useQuery({
     queryKey: ['languages'],
@@ -166,6 +179,7 @@ function NewJobForm({ defaults, onSubmitted }: NewJobFormProps) {
         message: null,
       });
       formRef.current?.reset();
+      setFileName(null);
       if (fileRef.current) fileRef.current.value = '';
     } catch (err) {
       setError(err instanceof ApiError ? err.message : (err as Error).message);
@@ -175,174 +189,256 @@ function NewJobForm({ defaults, onSubmitted }: NewJobFormProps) {
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Sparkles className="size-4 text-primary" /> New job
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <form ref={formRef} onSubmit={onSubmit} className="flex flex-col gap-4">
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-[1fr_auto]">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="input">URL or local path</Label>
-              <Input
-                id="input"
-                name="input"
-                placeholder="https://… or /path/to/video.mp4"
-                autoComplete="off"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="file">Or upload a file</Label>
-              <label
-                htmlFor="file"
-                className={cn(
-                  buttonClass('outline'),
-                  'cursor-pointer h-9 flex items-center gap-2',
-                )}
-              >
-                <Upload className="size-4" /> Choose file
-              </label>
-              <input
-                id="file"
-                ref={fileRef}
-                name="file"
-                type="file"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.currentTarget.files?.[0];
-                  if (f && formRef.current) {
-                    const inp = formRef.current.elements.namedItem('input') as HTMLInputElement;
-                    inp.value = f.name;
-                    inp.disabled = true;
-                  }
-                }}
-              />
-            </div>
-          </div>
+    <Card className="overflow-hidden">
+      {/* ── Accent bar ─────────────────────────────────────────── */}
+      <div className="h-1 bg-linear-to-r from-primary/60 via-primary/30 to-transparent" />
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="language">Source language</Label>
-              {langOptions ? (
-                <Select
-                  id="language"
-                  name="language"
-                  defaultValue={defaults?.language ?? 'fr'}
-                  required
+      <CardContent className="p-0">
+        <form ref={formRef} onSubmit={onSubmit}>
+          {/* ── Section: Source ────────────────────────────────── */}
+          <div className="p-6 pb-5">
+            <div className="mb-4 flex items-center gap-2">
+              <FileVideo className="size-4 text-muted-foreground" />
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Source
+              </h2>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-[1fr_auto]">
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="input">Video URL or local path</Label>
+                <div className="relative">
+                  <LinkIcon className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    id="input"
+                    name="input"
+                    placeholder="https://youtube.com/… or /path/to/video.mp4"
+                    autoComplete="off"
+                    disabled={!!fileName}
+                    className="pl-9"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <Label className="invisible md:visible">Upload</Label>
+                <label
+                  htmlFor="file"
+                  className={cn(
+                    'group flex h-9 cursor-pointer items-center gap-2 rounded-md border-2 border-dashed px-4 text-sm transition-colors',
+                    fileName
+                      ? 'border-primary/40 bg-primary/5 text-primary'
+                      : 'border-input hover:border-primary/40 hover:bg-accent/50',
+                  )}
                 >
-                  {langOptions}
-                </Select>
-              ) : (
-                <Input
-                  id="language"
-                  name="language"
-                  defaultValue={defaults?.language ?? 'fr'}
-                  required
+                  {fileName ? (
+                    <>
+                      <Check className="size-4 shrink-0" />
+                      <span className="truncate">{fileName}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="size-4 shrink-0 text-muted-foreground group-hover:text-foreground" />
+                      <span className="text-muted-foreground group-hover:text-foreground">
+                        Choose file…
+                      </span>
+                    </>
+                  )}
+                </label>
+                <input
+                  id="file"
+                  ref={fileRef}
+                  name="file"
+                  type="file"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.currentTarget.files?.[0];
+                    if (f && formRef.current) {
+                      const inp = formRef.current.elements.namedItem('input') as HTMLInputElement;
+                      inp.value = f.name;
+                      inp.disabled = true;
+                      setFileName(f.name);
+                    }
+                  }}
                 />
-              )}
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="translate">Translate to (optional)</Label>
-              {langOptions ? (
-                <Select id="translate" name="translate" defaultValue={defaults?.translate ?? ''}>
-                  <option value="">— none —</option>
-                  {langOptions}
-                </Select>
-              ) : (
-                <Input
-                  id="translate"
-                  name="translate"
-                  defaultValue={defaults?.translate ?? ''}
-                  placeholder="e.g. en, zh"
-                />
-              )}
+              </div>
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={() => setAdvanced((v) => !v)}
-            className="flex items-center gap-1 self-start text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <ChevronRight
-              className={cn('size-4 transition-transform', advanced && 'rotate-90')}
-            />
-            Advanced
-          </button>
-          {advanced ? <AdvancedFields defaults={defaults} /> : null}
+          {/* ── Divider ─────────────────────────────────────────── */}
+          <div className="mx-6 border-t" />
 
-          {error ? (
-            <p className="flex items-center gap-2 text-sm text-destructive">
-              <TriangleAlert className="size-4" /> {error}
-            </p>
-          ) : null}
+          {/* ── Section: Languages ─────────────────────────────── */}
+          <div className="p-6 py-5">
+            <div className="mb-4 flex items-center gap-2">
+              <Globe className="size-4 text-muted-foreground" />
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Languages
+              </h2>
+            </div>
 
-          <div className="flex justify-end">
-            <Button type="submit" disabled={busy}>
-              {busy ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="language">Source language</Label>
+                {langOptions ? (
+                  <Select
+                    id="language"
+                    name="language"
+                    defaultValue={defaults?.language ?? 'fr'}
+                    required
+                  >
+                    {langOptions}
+                  </Select>
+                ) : (
+                  <Input
+                    id="language"
+                    name="language"
+                    defaultValue={defaults?.language ?? 'fr'}
+                    required
+                  />
+                )}
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="translate">Translate to</Label>
+                {langOptions ? (
+                  <Select
+                    id="translate"
+                    name="translate"
+                    defaultValue={defaults?.translate ?? ''}
+                  >
+                    <option value="">— none —</option>
+                    {langOptions}
+                  </Select>
+                ) : (
+                  <Input
+                    id="translate"
+                    name="translate"
+                    defaultValue={defaults?.translate ?? ''}
+                    placeholder="e.g. en, zh"
+                  />
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* ── Divider ─────────────────────────────────────────── */}
+          <div className="mx-6 border-t" />
+
+          {/* ── Section: Advanced ───────────────────────────────── */}
+          <div className="p-6 pt-5">
+            <button
+              type="button"
+              onClick={() => setAdvanced((v) => !v)}
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 -mx-2 text-sm font-medium transition-colors hover:bg-accent"
+            >
+              <Settings2 className="size-4 text-muted-foreground" />
+              <span>Advanced</span>
+              <ChevronDown
+                className={cn(
+                  'ml-auto size-4 text-muted-foreground transition-transform',
+                  advanced && 'rotate-180',
+                )}
+              />
+            </button>
+
+            {advanced ? (
+              <div className="mt-4 grid grid-cols-1 gap-4 rounded-lg border bg-muted/30 p-4 md:grid-cols-2">
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="backend">Whisper backend</Label>
+                  <Select id="backend" name="backend" defaultValue="">
+                    <option value="">(default: {defaults?.backend ?? 'local'})</option>
+                    <option value="local">local</option>
+                    <option value="api">api</option>
+                  </Select>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="llm_backend">LLM backend</Label>
+                  <Select id="llm_backend" name="llm_backend" defaultValue="">
+                    <option value="">(default: {defaults?.llm_backend ?? 'local'})</option>
+                    <option value="local">local</option>
+                    <option value="api">api</option>
+                  </Select>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="whisper_model">Whisper model</Label>
+                  <Input
+                    id="whisper_model"
+                    name="whisper_model"
+                    placeholder={defaults?.whisper_model || 'auto'}
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="llm_model">LLM model</Label>
+                  <Input
+                    id="llm_model"
+                    name="llm_model"
+                    placeholder={defaults?.llm_model || 'auto'}
+                  />
+                </div>
+
+                <div className="col-span-full border-t" />
+
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="start">Start (ffmpeg)</Label>
+                  <Input id="start" name="start" placeholder="e.g. 00:01:00" />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="duration">Duration (ffmpeg)</Label>
+                  <Input id="duration" name="duration" placeholder="e.g. 00:05:00" />
+                </div>
+
+                <div className="col-span-full border-t" />
+
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="chunk_size">Chunk size (segments)</Label>
+                  <Input
+                    id="chunk_size"
+                    name="chunk_size"
+                    type="number"
+                    min={1}
+                    max={400}
+                    placeholder="auto"
+                  />
+                </div>
+                <div className="flex items-end gap-6">
+                  <label className="flex cursor-pointer items-center gap-2 text-sm">
+                    <Checkbox name="refine" defaultChecked={defaults?.refine} /> Refine
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-2 text-sm">
+                    <Checkbox name="subs" /> Existing subs
+                  </label>
+                </div>
+
+                <div className="col-span-full border-t" />
+
+                <WorkerSelect />
+              </div>
+            ) : null}
+          </div>
+
+          {/* ── Divider ─────────────────────────────────────────── */}
+          <div className="mx-6 border-t" />
+
+          {/* ── Section: Submit ─────────────────────────────────── */}
+          <div className="flex items-center justify-between gap-4 p-6 pt-5">
+            <div className="flex-1">
+              {error ? (
+                <p className="flex items-center gap-2 text-sm text-destructive">
+                  <TriangleAlert className="size-4 shrink-0" /> {error}
+                </p>
+              ) : null}
+            </div>
+            <Button type="submit" disabled={busy} size="lg" className="gap-2">
+              {busy ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Play className="size-4" />
+              )}
               <span>Start job</span>
             </Button>
           </div>
         </form>
       </CardContent>
     </Card>
-  );
-}
-
-function AdvancedFields({ defaults }: { defaults: FormDefaults | undefined }) {
-  return (
-    <div className="grid grid-cols-1 gap-4 rounded-md border bg-muted/30 p-4 md:grid-cols-2">
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="backend">Whisper backend</Label>
-        <Select id="backend" name="backend" defaultValue="">
-          <option value="">(default: {defaults?.backend ?? 'local'})</option>
-          <option value="local">local</option>
-          <option value="api">api</option>
-        </Select>
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="llm_backend">LLM backend</Label>
-        <Select id="llm_backend" name="llm_backend" defaultValue="">
-          <option value="">(default: {defaults?.llm_backend ?? 'local'})</option>
-          <option value="local">local</option>
-          <option value="api">api</option>
-        </Select>
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="whisper_model">Whisper model</Label>
-        <Input
-          id="whisper_model"
-          name="whisper_model"
-          placeholder={defaults?.whisper_model || 'auto'}
-        />
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="llm_model">LLM model</Label>
-        <Input id="llm_model" name="llm_model" placeholder={defaults?.llm_model || 'auto'} />
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="start">Start (ffmpeg)</Label>
-        <Input id="start" name="start" placeholder="e.g. 00:01:00" />
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="duration">Duration (ffmpeg)</Label>
-        <Input id="duration" name="duration" placeholder="e.g. 00:05:00" />
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="chunk_size">Chunk size (segments)</Label>
-        <Input id="chunk_size" name="chunk_size" type="number" min={1} max={400} placeholder="auto" />
-      </div>
-      <div className="flex items-end gap-6">
-        <label className="flex items-center gap-2 text-sm">
-          <Checkbox name="refine" /> Refine
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <Checkbox name="subs" /> Existing subs
-        </label>
-      </div>
-      <WorkerSelect />
-    </div>
   );
 }

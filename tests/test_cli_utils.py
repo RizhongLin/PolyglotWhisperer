@@ -1,8 +1,8 @@
-"""Tests for CLI utility functions — expand_inputs."""
+"""Tests for CLI utility functions."""
 
 import pytest
 
-from pgw.cli.utils import expand_inputs
+from pgw.cli.utils import build_config_overrides, expand_inputs
 
 
 class TestExpandInputs:
@@ -63,3 +63,67 @@ class TestExpandInputs:
         # No matching files — glob pattern with no matches returns the literal
         result = expand_inputs(["*.nonexistent"])
         assert result == ["*.nonexistent"]
+
+
+class TestBuildConfigOverrides:
+    def test_refine_true_sets_refine_enabled(self):
+        overrides = build_config_overrides(language="fr", device="auto", refine=True)
+        assert overrides["llm.refine_enabled"] is True
+
+    def test_refine_false_does_not_set_refine_enabled(self):
+        overrides = build_config_overrides(language="fr", device="auto")
+        assert "llm.refine_enabled" not in overrides
+
+    def test_translate_sets_target_language(self):
+        overrides = build_config_overrides(language="fr", device="auto", translate="en")
+        assert overrides["llm.target_language"] == "en"
+
+    def test_subs_true_sets_download_subtitles(self):
+        overrides = build_config_overrides(language="fr", device="auto", subs=True)
+        assert overrides["download.subtitles"] is True
+
+    def test_backend_sets_whisper_backend(self):
+        overrides = build_config_overrides(language="fr", device="auto", backend="api")
+        assert overrides["whisper.backend"] == "api"
+
+    def test_llm_backend_sets_llm_backend(self):
+        overrides = build_config_overrides(language="fr", device="auto", llm_backend="api")
+        assert overrides["llm.backend"] == "api"
+
+    def test_whisper_model_api_backend(self):
+        overrides = build_config_overrides(
+            language="fr", device="auto", whisper_model="whisper-1", backend="api"
+        )
+        assert overrides["whisper.api_model"] == "whisper-1"
+
+    def test_whisper_model_local_backend(self):
+        overrides = build_config_overrides(
+            language="fr", device="auto", whisper_model="large-v3", backend="local"
+        )
+        assert overrides["whisper.local_model"] == "large-v3"
+
+    def test_llm_model_api_backend(self):
+        overrides = build_config_overrides(
+            language="fr", device="auto", llm_model="gpt-4o", llm_backend="api"
+        )
+        assert overrides["llm.api_model"] == "gpt-4o"
+
+    def test_llm_model_local_backend(self):
+        overrides = build_config_overrides(
+            language="fr", device="auto", llm_model="gemma3:12b", llm_backend="local"
+        )
+        assert overrides["llm.local_model"] == "gemma3:12b"
+
+    def test_refine_and_translate_together(self):
+        """refine + translate should both be reflected in overrides."""
+        overrides = build_config_overrides(
+            language="fr", device="auto", refine=True, translate="en"
+        )
+        assert overrides["llm.refine_enabled"] is True
+        assert overrides["llm.target_language"] == "en"
+
+    def test_defaults_no_optional_overrides(self):
+        overrides = build_config_overrides(language="fr", device="auto")
+        assert "llm.target_language" not in overrides
+        assert "download.subtitles" not in overrides
+        assert "llm.refine_enabled" not in overrides

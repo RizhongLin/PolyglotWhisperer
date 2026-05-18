@@ -124,3 +124,18 @@ def test_chunk_size_precedence(tmp_path, env_isolation, monkeypatch):
 
     # Explicit argument beats config (simulates CLI ``--chunk-size``).
     assert _chunk_params(cfg.llm, chunk_size=200)[0] == 200
+
+
+def test_cli_refine_overrides_refine_enabled():
+    """--refine flag sets llm.refine_enabled via build_config_overrides → load_config."""
+    from pgw.cli.utils import build_config_overrides
+
+    overrides = build_config_overrides(language="fr", device="auto", refine=True)
+    config = load_config(**overrides)
+    assert config.llm.refine_enabled is True
+
+
+def test_cli_refine_false_leaves_default():
+    """Without --refine, refine_enabled stays at default (False)."""
+    config = load_config()
+    assert config.llm.refine_enabled is False

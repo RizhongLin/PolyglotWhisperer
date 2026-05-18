@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, createFileRoute } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
-import { CheckCircle2, Inbox, Loader2 } from 'lucide-react';
+import { Brain, CheckCircle2, Inbox, Loader2 } from 'lucide-react';
 import { ApiError, api } from '@/api/client';
 import { Card } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { ReviewCard } from '@/components/review/ReviewCard';
 import type { FsrsRating } from '@/api/types';
 
@@ -111,25 +112,44 @@ function ReviewPage() {
 
   return (
     <div className="mx-auto flex max-w-md flex-col gap-6">
-      <header className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight">Review</h1>
-        <span className="text-xs text-muted-foreground tabular-nums">
-          {reviewed} done · {Math.max(0, cards.length - index)} left
-        </span>
-      </header>
+      <section className="flex flex-col gap-3">
+        <div className="flex items-center gap-3">
+          <div className="flex size-10 items-center justify-center rounded-xl bg-primary/10">
+            <Brain className="size-5 text-primary" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Review</h1>
+            <p className="text-sm text-muted-foreground">
+              Spaced-repetition flashcard review
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Badge variant="secondary" className="tabular-nums">
+            {reviewed} done
+          </Badge>
+          <Badge variant="outline" className="tabular-nums">
+            {Math.max(0, cards.length - index)} left
+          </Badge>
+        </div>
+      </section>
 
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
       {!card ? (
-        <Card className="flex flex-col items-center gap-3 p-10 text-center">
+        <Card className="flex flex-col items-center gap-4 p-10 text-center">
           {reviewed > 0 ? (
             <>
-              <CheckCircle2 className="size-10 text-emerald-500" />
+              <div className="flex size-12 items-center justify-center rounded-xl bg-emerald-500/10">
+                <CheckCircle2 className="size-6 text-emerald-500" />
+              </div>
               <p className="text-sm">Queue empty — {reviewed} cards reviewed.</p>
             </>
           ) : (
             <>
-              <Inbox className="size-10 text-muted-foreground" />
+              <div className="flex size-12 items-center justify-center rounded-xl bg-muted">
+                <Inbox className="size-6 text-muted-foreground" />
+              </div>
               <p className="text-sm text-muted-foreground">No cards due right now.</p>
             </>
           )}

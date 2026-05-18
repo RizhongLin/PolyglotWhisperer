@@ -50,6 +50,7 @@ def build_config_overrides(
     backend: str | None = None,
     translate: str | None = None,
     subs: bool = False,
+    refine: bool = False,
 ) -> dict[str, object]:
     """Build config override dict from CLI flags."""
     overrides: dict[str, object] = {
@@ -70,6 +71,8 @@ def build_config_overrides(
         overrides["llm.target_language"] = translate
     if subs:
         overrides["download.subtitles"] = True
+    if refine:
+        overrides["llm.refine_enabled"] = True
     return overrides
 
 

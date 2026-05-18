@@ -99,6 +99,7 @@ def run(
         backend=backend,
         translate=translate,
         subs=subs,
+        refine=refine,
     )
     config = load_config(**overrides)
 

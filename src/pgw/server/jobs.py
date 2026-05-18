@@ -544,6 +544,7 @@ class JobManager:
             backend=req.get("backend"),
             translate=req.get("translate"),
             subs=req.get("subs", False),
+            refine=req.get("refine", False),
         )
 
         # P1: env_overrides is empty (single-tenant). P2 will populate it

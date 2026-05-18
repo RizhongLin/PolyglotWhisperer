@@ -149,6 +149,7 @@ export interface FormDefaults {
   llm_backend: string;
   whisper_model: string;
   llm_model: string;
+  refine: boolean;
 }
 
 export interface LanguageInfo {

@@ -317,32 +317,37 @@ function PlayerLayout({ detail, vocab, slug, ts }: LayoutProps) {
   }, []);
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-8">
       <Link to="/library" className={cn(buttonClass('ghost', 'sm'), 'self-start')}>
         <ArrowLeft className="size-4" />
         Library
       </Link>
 
-      <header className="flex items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {meta.title ?? slug}
-          </h1>
-          {meta.uploader ? (
-            <p className="text-sm text-muted-foreground">{meta.uploader}</p>
-          ) : null}
+      <section className="flex flex-col gap-3">
+        <div className="flex items-center gap-3">
+          <div className="flex size-10 items-center justify-center rounded-xl bg-primary/10">
+            <FileVideo className="size-5 text-primary" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">
+              {meta.title ?? slug}
+            </h1>
+            {meta.uploader ? (
+              <p className="text-sm text-muted-foreground">{meta.uploader}</p>
+            ) : null}
+          </div>
         </div>
         {meta.source_url ? (
           <a
             href={meta.source_url}
             target="_blank"
             rel="noreferrer"
-            className={buttonClass('outline', 'sm')}
+            className={cn(buttonClass('outline', 'sm'), 'self-start')}
           >
             <ExternalLink className="size-3.5" /> Source
           </a>
         ) : null}
-      </header>
+      </section>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[2fr_1fr]">
         <div className="flex flex-col gap-4">
@@ -494,7 +499,8 @@ function PlayerLayout({ detail, vocab, slug, ts }: LayoutProps) {
           {vocab ? <VocabCard vocab={vocab} /> : null}
           <DownloadsCard detail={detail} wsBase={wsBase} />
           {detail.metadata.description ? (
-            <Card>
+            <Card className="overflow-hidden">
+              <div className="h-[3px] bg-linear-to-r from-primary/50 via-primary/20 to-transparent" />
               <CardHeader>
                 <CardTitle>Description</CardTitle>
               </CardHeader>
@@ -721,6 +727,7 @@ function Transcript({
 
   return (
     <Card className="overflow-hidden p-0 relative">
+      <div className="h-[3px] bg-linear-to-r from-primary/50 via-primary/20 to-transparent" />
       <CardHeader className="flex flex-row items-center justify-between border-b py-3">
         <CardTitle className="text-sm">Transcript</CardTitle>
         <span className="text-xs text-muted-foreground">
@@ -837,7 +844,8 @@ function DetailsCard({ detail }: { detail: WorkspaceDetail }) {
   if (m.llm_model) rows.push(['LLM', <Brain className="size-3.5" key="b" />, <code>{m.llm_model}</code>]);
 
   return (
-    <Card>
+    <Card className="overflow-hidden">
+      <div className="h-[3px] bg-linear-to-r from-primary/50 via-primary/20 to-transparent" />
       <CardHeader>
         <CardTitle>Details</CardTitle>
       </CardHeader>
@@ -877,7 +885,8 @@ function VocabCard({ vocab }: { vocab: VocabSummary }) {
   const [expanded, setExpanded] = useState(false);
   const top = (vocab.top_rare_words ?? []).slice(0, expanded ? undefined : 8);
   return (
-    <Card>
+    <Card className="overflow-hidden">
+      <div className="h-[3px] bg-linear-to-r from-primary/50 via-primary/20 to-transparent" />
       <CardHeader>
         <CardTitle className="flex items-center justify-between">
           Vocabulary
@@ -946,7 +955,8 @@ function fileIcon(suffix: string): React.ReactNode {
 function DownloadsCard({ detail, wsBase }: { detail: WorkspaceDetail; wsBase: string }) {
   if (detail.files.length === 0) return null;
   return (
-    <Card>
+    <Card className="overflow-hidden">
+      <div className="h-[3px] bg-linear-to-r from-primary/50 via-primary/20 to-transparent" />
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Download className="size-4" /> Downloads

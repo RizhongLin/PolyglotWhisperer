@@ -93,6 +93,7 @@ def transcribe(
         llm_backend=llm_backend,
         backend=backend,
         subs=subs,
+        refine=refine,
     )
     config = load_config(**overrides)
 
@@ -201,7 +202,7 @@ def _transcribe_single(
 
             segments = postprocess_segments(segments, language)
 
-        if refine:
+        if refine and config.llm.refine_enabled:
             from pgw.llm.refine import refine_subtitles
 
             stage("Refining", config.llm.model)
@@ -228,7 +229,7 @@ def _transcribe_single(
         segments = api_transcribe(audio_path, config.whisper, config.workspace_dir)
         segments = postprocess_segments(segments, language)
 
-        if refine:
+        if refine and config.llm.refine_enabled:
             from pgw.llm.refine import refine_subtitles
 
             stage("Refining", config.llm.model)
@@ -241,7 +242,7 @@ def _transcribe_single(
 
         result = do_transcribe(audio_path, config.whisper)
 
-        if refine:
+        if refine and config.llm.refine_enabled:
             from pgw.llm.refine import refine_subtitles
             from pgw.subtitles.converter import result_to_segments, save_subtitles
             from pgw.transcriber.postprocess import postprocess_segments

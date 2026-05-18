@@ -318,6 +318,7 @@ def _form_defaults() -> dict:
             "llm_backend": cfg.llm.backend or "local",
             "whisper_model": cfg.whisper.model or "",
             "llm_model": cfg.llm.model or "",
+            "refine": cfg.llm.refine_enabled,
         }
     except Exception:  # noqa: BLE001 - best-effort
         return {
@@ -327,6 +328,7 @@ def _form_defaults() -> dict:
             "llm_backend": "api",
             "whisper_model": "",
             "llm_model": "",
+            "refine": False,
         }
 
 
